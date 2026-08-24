@@ -1,0 +1,17 @@
+{
+  "name": "campus-opportunity",
+  "version": "0.1.0",
+  "private": true,
+  "packageManager": "pnpm@11.19.0",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "dev": "pnpm --parallel --filter @campus/web --filter @campus/api dev",
+    "dev:web": "pnpm --filter @campus/web dev",
+    "dev:api": "pnpm --filter @campus/api dev",
+    "build": "pnpm --filter @campus/shared typecheck && pnpm --filter @campus/api build && pnpm --filter @campus/web build",
+    "typecheck": "pnpm -r typecheck",
+    "test": "pnpm --filter @campus/api test"
+  }
+}
