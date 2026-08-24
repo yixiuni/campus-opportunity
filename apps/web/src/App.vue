@@ -1,8 +1,34 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, ref } from 'vue';
+import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue';
 
 type Category = 'all' | 'project' | 'competition' | 'research' | 'startup' | 'study';
-type MobileSection = 'opportunities' | 'publish';
+type MobileSection = 'opportunities' | 'matching' | 'publish' | 'applications' | 'profile';
+type ApplicationStatus = 'all' | 'pending' | 'approved' | 'closed';
+type ApplicationViewRole = 'applicant' | 'publisher';
+type MatchRole = 'teacher' | 'student';
+type MatchStage = 'idle' | 'matching' | 'results';
+type ProfilePanel = 'overview' | 'published' | 'applications';
+
+const MATCH_DAILY_LIMIT = 3;
+
+function getLocalDayKey() {
+  const now = new Date();
+  const month = String(now.getMonth() + 1).padStart(2, '0');
+  const day = String(now.getDate()).padStart(2, '0');
+  return `${now.getFullYear()}-${month}-${day}`;
+}
+
+function loadDailyMatchCount() {
+  try {
+    const stored = JSON.parse(localStorage.getItem('campus-match-daily-usage-v1') || '{}') as {
+      date?: string;
+      count?: number;
+    };
+    return stored.date === getLocalDayKey() ? Math.min(stored.count || 0, MATCH_DAILY_LIMIT) : 0;
+  } catch {
+    return 0;
+  }
+}
 
 interface Opportunity {
   id: string;
@@ -19,6 +45,20 @@ interface Opportunity {
   featured?: boolean;
 }
 
+interface MatchPerson {
+  id: string;
+  name: string;
+  avatar: string;
+  role: MatchRole;
+  roleLabel: string;
+  college: string;
+  focus: string;
+  introduction: string;
+  tags: string[];
+  reasons: string[];
+  score: number;
+}
+
 const categoryLabels: Record<Category, string> = {
   all: '全部',
   project: '项目',
@@ -27,6 +67,213 @@ const categoryLabels: Record<Category, string> = {
   startup: '创业',
   study: '学业',
 };
+
+const applicationStatusLabels: Record<ApplicationStatus, string> = {
+  all: '全部',
+  pending: '待处理',
+  approved: '已通过',
+  closed: '已结束',
+};
+
+const applicationRecords = ref([
+  {
+    id: 'application-ai-agent',
+    kind: 'opportunity' as const,
+    title: '校园 AI Agent 项目招募前端成员',
+    college: '人工智能学院',
+    category: '项目',
+    submittedAt: '今天 14:20',
+    status: 'pending' as Exclude<ApplicationStatus, 'all'>,
+    statusText: '待处理',
+    update: '申请已送达，等待发起人查看',
+  },
+  {
+    id: 'application-challenge-cup',
+    kind: 'opportunity' as const,
+    title: '挑战杯团队寻找产品与调研成员',
+    college: '管理学院',
+    category: '竞赛',
+    submittedAt: '8 月 22 日',
+    status: 'approved' as Exclude<ApplicationStatus, 'all'>,
+    statusText: '已通过',
+    update: '发起人已通过你的申请，可以开始联系',
+  },
+  {
+    id: 'application-research',
+    kind: 'opportunity' as const,
+    title: '计算机视觉课题招募本科生助研',
+    college: '计算机学院',
+    category: '科研',
+    submittedAt: '8 月 18 日',
+    status: 'closed' as Exclude<ApplicationStatus, 'all'>,
+    statusText: '已结束',
+    update: '该机会的本轮招募已结束',
+  },
+  {
+    id: 'match-wu-teacher',
+    kind: 'match' as const,
+    title: '希望与吴老师建立联系',
+    college: '计算机学院 · 教师',
+    category: '个人匹配',
+    submittedAt: '8 月 24 日',
+    status: 'approved' as Exclude<ApplicationStatus, 'all'>,
+    statusText: '已同意',
+    update: '吴老师已同意你的匹配请求，可以开始联系',
+  },
+]);
+
+const initialPublisherApplicationRecords = [
+  {
+    id: 'received-wang',
+    kind: 'opportunity' as const,
+    applicant: '王同学',
+    college: '计算机学院',
+    avatar: '王',
+    opportunity: '校园 AI Agent 项目招募前端成员',
+    submittedAt: '今天 15:10',
+    status: 'pending' as Exclude<ApplicationStatus, 'all'>,
+    statusText: '待处理',
+    note: '有两个 Vue 3 项目经验，熟悉 TypeScript，希望参与校园产品共创。',
+    tags: ['Vue 3', 'TypeScript', '每周 8 小时'],
+    hasProfile: true,
+  },
+  {
+    id: 'received-liu',
+    kind: 'opportunity' as const,
+    applicant: '刘同学',
+    college: '设计学院',
+    avatar: '刘',
+    opportunity: '校园 AI Agent 项目招募前端成员',
+    submittedAt: '8 月 24 日',
+    status: 'approved' as Exclude<ApplicationStatus, 'all'>,
+    statusText: '已通过',
+    note: '擅长移动端界面与交互设计，可以负责原型和用户测试。',
+    tags: ['产品设计', 'Figma', '用户调研'],
+    hasProfile: true,
+  },
+  {
+    id: 'received-zhou',
+    kind: 'opportunity' as const,
+    applicant: '周同学',
+    college: '软件学院',
+    avatar: '周',
+    opportunity: '校园 AI Agent 项目招募前端成员',
+    submittedAt: '8 月 21 日',
+    status: 'closed' as Exclude<ApplicationStatus, 'all'>,
+    statusText: '未通过',
+    note: '希望了解项目并参与部分前端开发工作。',
+    tags: ['JavaScript', '小程序'],
+    hasProfile: false,
+  },
+  {
+    id: 'received-match-zhao',
+    kind: 'match' as const,
+    applicant: '赵同学',
+    college: '软件学院 · 2027 届',
+    avatar: '赵',
+    opportunity: '希望交流校园 AI 产品与前端实践',
+    submittedAt: '今天 16:05',
+    status: 'pending' as Exclude<ApplicationStatus, 'all'>,
+    statusText: '待处理',
+    note: '老师您好，我正在做一款校园 AI 产品，希望向您请教模型应用和项目落地方面的问题。',
+    tags: ['Vue 3', 'AI 应用', '校园产品'],
+    hasProfile: true,
+  },
+];
+
+const matchPeople: MatchPerson[] = [
+  {
+    id: 'teacher-zhang',
+    name: '张老师',
+    avatar: '张',
+    role: 'teacher',
+    roleLabel: '副教授',
+    college: '人工智能学院',
+    focus: '大模型应用与人机协作',
+    introduction: '关注大模型在教育与校园服务中的落地，指导过多项学生创新项目。',
+    tags: ['大模型应用', '科研入门', '项目指导'],
+    reasons: ['研究方向相关', '有学生项目指导经验'],
+    score: 92,
+  },
+  {
+    id: 'teacher-wu',
+    name: '吴老师',
+    avatar: '吴',
+    role: 'teacher',
+    roleLabel: '讲师',
+    college: '计算机学院',
+    focus: '前端工程与智能交互',
+    introduction: '研究智能交互与软件工程，愿意为校内技术实践提供方法建议。',
+    tags: ['智能交互', '软件工程', '技术实践'],
+    reasons: ['技能方向重合', '近期开放交流'],
+    score: 87,
+  },
+  {
+    id: 'teacher-li',
+    name: '李老师',
+    avatar: '李',
+    role: 'teacher',
+    roleLabel: '副教授',
+    college: '创新创业学院',
+    focus: '创新项目孵化与成果转化',
+    introduction: '长期指导学生创新创业项目，关注真实需求验证与跨学院团队协作。',
+    tags: ['项目孵化', '需求验证', '团队指导'],
+    reasons: ['项目阶段契合', '跨学科指导经验'],
+    score: 85,
+  },
+  {
+    id: 'student-lin',
+    name: '林同学',
+    avatar: '林',
+    role: 'student',
+    roleLabel: '2027 届本科生',
+    college: '设计学院',
+    focus: '产品设计与用户研究',
+    introduction: '正在寻找校园产品共创伙伴，擅长原型设计、访谈和移动端体验。',
+    tags: ['产品设计', 'Figma', '用户调研'],
+    reasons: ['互补能力突出', '共同关注校园产品'],
+    score: 90,
+  },
+  {
+    id: 'student-chen',
+    name: '陈同学',
+    avatar: '陈',
+    role: 'student',
+    roleLabel: '2026 届研究生',
+    college: '管理学院',
+    focus: '创新创业与商业分析',
+    introduction: '有挑战杯和创业项目经验，希望认识技术伙伴共同验证校园需求。',
+    tags: ['商业分析', '挑战杯', '创业实践'],
+    reasons: ['项目目标相近', '经历可以互补'],
+    score: 84,
+  },
+  {
+    id: 'student-sun',
+    name: '孙同学',
+    avatar: '孙',
+    role: 'student',
+    roleLabel: '2027 届本科生',
+    college: '软件学院',
+    focus: 'Vue 3 与小程序开发',
+    introduction: '参与过两个校内服务小程序，希望寻找重视用户体验的长期项目。',
+    tags: ['Vue 3', '小程序', 'TypeScript'],
+    reasons: ['技术栈高度相关', '可投入时间匹配'],
+    score: 88,
+  },
+  {
+    id: 'student-huang',
+    name: '黄同学',
+    avatar: '黄',
+    role: 'student',
+    roleLabel: '2026 届研究生',
+    college: '人工智能学院',
+    focus: '智能体应用与模型评测',
+    introduction: '正在研究校园场景中的智能体应用，希望认识产品和前端方向的合作伙伴。',
+    tags: ['AI Agent', '模型评测', 'Python'],
+    reasons: ['研究主题相关', '合作角色互补'],
+    score: 86,
+  },
+];
 
 const fallback: Opportunity[] = [
   {
@@ -57,7 +304,30 @@ const isApplicationSheetOpen = ref(false);
 const applicationSubmitted = ref(false);
 const shouldSendPersonalProfile = ref(true);
 const applicationNote = ref('');
-const activeMobileSection = ref<MobileSection>(window.location.hash === '#publish' ? 'publish' : 'opportunities');
+const initialMobileSection: MobileSection = window.location.hash === '#publish'
+  ? 'publish'
+  : window.location.hash === '#matching'
+    ? 'matching'
+  : window.location.hash === '#applications'
+    ? 'applications'
+  : window.location.hash === '#profile'
+    ? 'profile'
+    : 'opportunities';
+const activeMobileSection = ref<MobileSection>(initialMobileSection);
+const matchStage = ref<MatchStage>('idle');
+const matchDailyCount = ref(loadDailyMatchCount());
+const matchAnimationMessage = ref('正在读取你的方向与个人说明');
+const roundMatchPeople = ref<MatchPerson[]>([]);
+const selectedMatchRole = ref<MatchRole>('teacher');
+const selectedMatchPerson = ref<MatchPerson | null>(null);
+const requestedMatchIds = ref<Set<string>>(new Set(['teacher-wu']));
+const isMatchSheetOpen = ref(false);
+const matchRequestSubmitted = ref(false);
+const matchIntent = ref('');
+const shouldSendMatchProfile = ref(true);
+const applicationViewRole = ref<ApplicationViewRole>('applicant');
+const selectedApplicationStatus = ref<ApplicationStatus>('all');
+const publisherApplicationRecords = ref(initialPublisherApplicationRecords);
 const publishForm = ref({
   category: 'project' as Exclude<Category, 'all'>,
   title: '',
@@ -69,12 +339,285 @@ const publishForm = ref({
   tags: '',
 });
 const publishFormMessage = ref('');
+const personalProfile = ref({
+  headline: '校园 AI 产品与前端实践者',
+  introduction: '关注校园场景中的 AI 产品，正在学习 Vue 3、TypeScript 与用户调研，希望认识愿意长期共创的老师和同学。',
+  tags: ['Vue 3', 'TypeScript', 'AI 应用', '用户调研'],
+  availability: '每周可投入 6–8 小时',
+});
+const profileDraft = ref({
+  headline: '',
+  introduction: '',
+  tags: '',
+  availability: '',
+});
+const isProfileEditorOpen = ref(false);
+const profileSaveMessage = ref('');
+const profilePanel = ref<ProfilePanel>('overview');
+const profilePublications = ref([
+  {
+    id: 'profile-published-ai-agent',
+    title: '校园 AI Agent 项目招募前端成员',
+    category: '项目',
+    summary: '一起完成面向校内服务的 AI Agent 原型，寻找愿意持续共创的前端同学。',
+    applicants: 6,
+    deadline: '2026-09-10',
+    status: '招募中',
+  },
+  {
+    id: 'profile-draft-research',
+    title: '校园智能体用户调研伙伴',
+    category: '项目',
+    summary: '面向校内师生开展需求访谈与产品验证。',
+    applicants: 0,
+    deadline: '2026-09-20',
+    status: '草稿',
+  },
+]);
+const selectedProfilePublicationId = ref<string | null>(null);
+const profilePublicationDraft = ref({ title: '', summary: '', deadline: '' });
+const isProfilePublicationEditorOpen = ref(false);
+const selectedProfileApplicationId = ref<string | null>(null);
+const profileApplicationNotes = ref<Record<string, string>>({
+  'application-ai-agent': '希望参与前端开发与交互设计，也愿意配合早期用户调研。',
+  'application-challenge-cup': '有校园产品策划经历，希望负责调研和方案整理。',
+  'application-research': '正在学习 Python 与计算机视觉，希望参与论文复现。',
+  'match-wu-teacher': '希望请教智能交互方向的科研入门与项目实践。',
+});
+const profileApplicationDraft = ref('');
+const isProfileApplicationEditorOpen = ref(false);
 let listScrollPosition = 0;
+let matchAnimationTimers: ReturnType<typeof setTimeout>[] = [];
+
+const filteredApplicationRecords = computed(() => {
+  if (selectedApplicationStatus.value === 'all') return applicationRecords.value;
+  return applicationRecords.value.filter((item) => item.status === selectedApplicationStatus.value);
+});
+
+const filteredMatchPeople = computed(() =>
+  roundMatchPeople.value.filter((person) => person.role === selectedMatchRole.value),
+);
+
+const matchRemainingCount = computed(() =>
+  Math.max(0, MATCH_DAILY_LIMIT - matchDailyCount.value),
+);
+
+const filteredPublisherApplicationRecords = computed(() => {
+  if (selectedApplicationStatus.value === 'all') return publisherApplicationRecords.value;
+  return publisherApplicationRecords.value.filter((item) => item.status === selectedApplicationStatus.value);
+});
+
+const currentApplicationStatusLabels = computed(() => ({
+  ...applicationStatusLabels,
+  closed: applicationViewRole.value === 'publisher' ? '未通过' : '已结束',
+}));
+
+function selectApplicationViewRole(role: ApplicationViewRole) {
+  applicationViewRole.value = role;
+  selectedApplicationStatus.value = 'all';
+}
+
+function updatePublisherApplicationStatus(id: string, status: 'approved' | 'closed') {
+  publisherApplicationRecords.value = publisherApplicationRecords.value.map((item) =>
+    item.id === id
+      ? {
+          ...item,
+          status,
+          statusText: status === 'approved'
+            ? item.kind === 'match' ? '已同意' : '已通过'
+            : item.kind === 'match' ? '已婉拒' : '未通过',
+        }
+      : item,
+  );
+}
+
+function takeRoundMatches(role: MatchRole, count: number, round: number) {
+  const candidates = matchPeople.filter((person) => person.role === role);
+  const resultCount = Math.min(count, candidates.length);
+  const startIndex = (round - 1) % candidates.length;
+
+  return Array.from(
+    { length: resultCount },
+    (_, index) => candidates[(startIndex + index) % candidates.length]!,
+  );
+}
+
+function clearMatchAnimationTimers() {
+  matchAnimationTimers.forEach((timer) => clearTimeout(timer));
+  matchAnimationTimers = [];
+}
+
+function startMatchRound() {
+  if (matchRemainingCount.value === 0) return;
+
+  clearMatchAnimationTimers();
+  const nextRound = matchDailyCount.value + 1;
+  const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const stepDuration = reduceMotion ? 40 : 430;
+
+  matchStage.value = 'matching';
+  matchAnimationMessage.value = '正在读取你的方向与个人说明';
+  selectedMatchRole.value = 'teacher';
+  window.scrollTo(0, 0);
+
+  matchAnimationTimers.push(
+    setTimeout(() => {
+      matchAnimationMessage.value = '正在寻找方向相近的老师和同学';
+    }, stepDuration),
+    setTimeout(() => {
+      matchAnimationMessage.value = '正在检查双方的联系意愿';
+    }, stepDuration * 2),
+    setTimeout(() => {
+      roundMatchPeople.value = [
+        ...takeRoundMatches('teacher', 2, nextRound),
+        ...takeRoundMatches('student', 3, nextRound),
+      ];
+      matchDailyCount.value = nextRound;
+      localStorage.setItem('campus-match-daily-usage-v1', JSON.stringify({
+        date: getLocalDayKey(),
+        count: matchDailyCount.value,
+      }));
+      matchStage.value = 'results';
+      matchAnimationTimers = [];
+    }, stepDuration * 3),
+  );
+}
+
+function openMatchRequest(person: MatchPerson) {
+  if (requestedMatchIds.value.has(person.id)) return;
+  selectedMatchPerson.value = person;
+  matchIntent.value = '';
+  shouldSendMatchProfile.value = true;
+  matchRequestSubmitted.value = false;
+  isMatchSheetOpen.value = true;
+}
+
+function closeMatchRequest() {
+  isMatchSheetOpen.value = false;
+}
+
+function submitMatchRequest() {
+  const person = selectedMatchPerson.value;
+  if (!person || !matchIntent.value.trim()) return;
+
+  const nextRequestedIds = new Set(requestedMatchIds.value);
+  nextRequestedIds.add(person.id);
+  requestedMatchIds.value = nextRequestedIds;
+
+  if (!applicationRecords.value.some((item) => item.id === `match-${person.id}`)) {
+    applicationRecords.value.unshift({
+      id: `match-${person.id}`,
+      kind: 'match',
+      title: `希望与${person.name}建立联系`,
+      college: `${person.college} · ${person.roleLabel}`,
+      category: '个人匹配',
+      submittedAt: '刚刚',
+      status: 'pending',
+      statusText: '待处理',
+      update: `匹配请求已送达，等待${person.name}确认`,
+    });
+  }
+
+  matchRequestSubmitted.value = true;
+}
 
 function selectMobileSection(section: MobileSection) {
   activeMobileSection.value = section;
+  if (section === 'profile') profilePanel.value = 'overview';
   window.history.replaceState(null, '', `#${section}`);
   window.scrollTo(0, 0);
+}
+
+function selectProfilePanel(panel: ProfilePanel) {
+  profilePanel.value = panel;
+  window.scrollTo(0, 0);
+}
+
+function openProfileEditor() {
+  profileDraft.value = {
+    headline: personalProfile.value.headline,
+    introduction: personalProfile.value.introduction,
+    tags: personalProfile.value.tags.join('、'),
+    availability: personalProfile.value.availability,
+  };
+  profileSaveMessage.value = '';
+  isProfileEditorOpen.value = true;
+}
+
+function closeProfileEditor() {
+  isProfileEditorOpen.value = false;
+}
+
+function savePersonalProfile() {
+  const draft = profileDraft.value;
+  if (!draft.headline.trim() || !draft.introduction.trim()) {
+    profileSaveMessage.value = '请先填写个人方向和个人介绍';
+    return;
+  }
+
+  personalProfile.value = {
+    headline: draft.headline.trim(),
+    introduction: draft.introduction.trim(),
+    tags: draft.tags.split(/[、,，]/).map((tag) => tag.trim()).filter(Boolean).slice(0, 8),
+    availability: draft.availability.trim() || '投入时间待补充',
+  };
+  profileSaveMessage.value = '个人说明已更新';
+  window.setTimeout(() => {
+    isProfileEditorOpen.value = false;
+    profileSaveMessage.value = '';
+  }, 420);
+}
+
+function openProfilePublicationEditor(id: string) {
+  const item = profilePublications.value.find((publication) => publication.id === id);
+  if (!item) return;
+  selectedProfilePublicationId.value = id;
+  profilePublicationDraft.value = {
+    title: item.title,
+    summary: item.summary,
+    deadline: item.deadline,
+  };
+  isProfilePublicationEditorOpen.value = true;
+}
+
+function closeProfilePublicationEditor() {
+  isProfilePublicationEditorOpen.value = false;
+  selectedProfilePublicationId.value = null;
+}
+
+function saveProfilePublication() {
+  const id = selectedProfilePublicationId.value;
+  const draft = profilePublicationDraft.value;
+  if (!id || !draft.title.trim() || !draft.summary.trim() || !draft.deadline) return;
+  profilePublications.value = profilePublications.value.map((item) =>
+    item.id === id
+      ? { ...item, title: draft.title.trim(), summary: draft.summary.trim(), deadline: draft.deadline }
+      : item,
+  );
+  closeProfilePublicationEditor();
+}
+
+function openProfileApplicationEditor(id: string) {
+  const item = applicationRecords.value.find((application) => application.id === id);
+  if (!item || item.status !== 'pending') return;
+  selectedProfileApplicationId.value = id;
+  profileApplicationDraft.value = profileApplicationNotes.value[id] || '';
+  isProfileApplicationEditorOpen.value = true;
+}
+
+function closeProfileApplicationEditor() {
+  isProfileApplicationEditorOpen.value = false;
+  selectedProfileApplicationId.value = null;
+}
+
+function saveProfileApplication() {
+  const id = selectedProfileApplicationId.value;
+  if (!id || !profileApplicationDraft.value.trim()) return;
+  profileApplicationNotes.value = {
+    ...profileApplicationNotes.value,
+    [id]: profileApplicationDraft.value.trim(),
+  };
+  closeProfileApplicationEditor();
 }
 
 function savePublishDraft() {
@@ -207,6 +750,7 @@ async function loadOpportunities() {
 }
 
 onMounted(loadOpportunities);
+onBeforeUnmount(clearMatchAnimationTimers);
 </script>
 
 <template>
@@ -398,7 +942,7 @@ onMounted(loadOpportunities);
         <a href="#applications">我的申请</a>
       </nav>
 
-      <button class="profile-button" type="button">
+      <button class="profile-button" type="button" @click="selectMobileSection('profile')">
         <span class="avatar">陈</span>
         <span>我的档案</span>
       </button>
@@ -562,7 +1106,190 @@ onMounted(loadOpportunities);
       </section>
     </main>
 
-    <main v-else class="publish-page" aria-label="发布校园机会">
+    <main v-else-if="activeMobileSection === 'matching'" class="matching-page" aria-label="AI 个人匹配">
+      <section v-if="matchStage === 'idle'" class="matching-start-card">
+        <div class="matching-start-visual" aria-hidden="true">
+          <span class="matching-start-orbit orbit-one"></span>
+          <span class="matching-start-orbit orbit-two"></span>
+          <span class="matching-start-core">
+            <svg viewBox="0 0 24 24"><path d="m12 3 1.5 4.1L18 9l-4.5 1.9L12 15l-1.5-4.1L6 9l4.5-1.9z"></path><path d="m19 15 .8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8z"></path></svg>
+          </span>
+          <i class="matching-start-person person-one">师</i>
+          <i class="matching-start-person person-two">生</i>
+          <i class="matching-start-person person-three">生</i>
+        </div>
+        <small>AI PERSON MATCHING</small>
+        <h1>开始一轮个人匹配</h1>
+        <p>根据你的个人说明、能力方向和联系意愿，寻找值得请教或适合一起做事的人。</p>
+        <button type="button" :disabled="matchRemainingCount === 0" @click="startMatchRound">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3 1.5 4.1L18 9l-4.5 1.9L12 15l-1.5-4.1L6 9l4.5-1.9z"></path></svg>
+          {{ matchRemainingCount === 0 ? '今日次数已用完' : '开始匹配' }}
+        </button>
+        <small class="matching-start-note">
+          每天最多匹配 3 次 · 今日还可匹配 {{ matchRemainingCount }} 次
+        </small>
+      </section>
+
+      <section v-else-if="matchStage === 'matching'" class="matching-animation-card" aria-live="polite" aria-busy="true">
+        <div class="matching-radar" aria-hidden="true">
+          <span class="matching-radar-ring ring-one"></span>
+          <span class="matching-radar-ring ring-two"></span>
+          <span class="matching-radar-ring ring-three"></span>
+          <span class="matching-radar-sweep"></span>
+          <span class="matching-radar-core">
+            <svg viewBox="0 0 24 24"><path d="m12 3 1.5 4.1L18 9l-4.5 1.9L12 15l-1.5-4.1L6 9l4.5-1.9z"></path></svg>
+          </span>
+          <i class="matching-radar-dot dot-one"></i>
+          <i class="matching-radar-dot dot-two"></i>
+          <i class="matching-radar-dot dot-three"></i>
+        </div>
+        <h1>正在为你匹配</h1>
+        <p>{{ matchAnimationMessage }}</p>
+        <span class="matching-loading-dots" aria-hidden="true"><i></i><i></i><i></i></span>
+      </section>
+
+      <template v-else>
+        <section class="matching-profile-brief matching-results-enter">
+          <span class="matching-profile-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24"><path d="m12 3 1.5 4.1L18 9l-4.5 1.9L12 15l-1.5-4.1L6 9l4.5-1.9z"></path><path d="m19 15 .8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8z"></path></svg>
+          </span>
+          <span>
+            <strong>匹配完成</strong>
+          </span>
+          <button
+            class="matching-rematch-button"
+            type="button"
+            :disabled="matchRemainingCount === 0"
+            @click="startMatchRound"
+          >{{ matchRemainingCount === 0 ? '今日次数已用完' : '再来一轮' }}</button>
+        </section>
+
+        <section class="matching-role-tabs matching-results-enter" role="tablist" aria-label="匹配对象类型">
+          <button
+            type="button"
+            role="tab"
+            :aria-selected="selectedMatchRole === 'teacher'"
+            :class="{ active: selectedMatchRole === 'teacher' }"
+            @click="selectedMatchRole = 'teacher'"
+          >推荐老师</button>
+          <button
+            type="button"
+            role="tab"
+            :aria-selected="selectedMatchRole === 'student'"
+            :class="{ active: selectedMatchRole === 'student' }"
+            @click="selectedMatchRole = 'student'"
+          >推荐同学</button>
+        </section>
+
+        <section class="matching-person-list matching-results-enter" aria-live="polite">
+          <article v-for="person in filteredMatchPeople" :key="person.id" class="matching-person-card">
+            <header>
+              <span class="matching-person-avatar" aria-hidden="true">{{ person.avatar }}</span>
+              <span class="matching-person-identity">
+                <strong>{{ person.name }}</strong>
+                <small>{{ person.college }} · {{ person.roleLabel }}</small>
+              </span>
+              <span class="matching-score"><strong>{{ person.score }}%</strong><small>匹配度</small></span>
+            </header>
+
+            <div class="matching-person-focus">
+              <small>关注方向</small>
+              <strong>{{ person.focus }}</strong>
+            </div>
+            <p>{{ person.introduction }}</p>
+
+            <div class="matching-person-tags" aria-label="个人标签">
+              <span v-for="tag in person.tags" :key="tag">{{ tag }}</span>
+            </div>
+
+            <footer>
+              <span class="matching-reasons">
+                <small v-for="reason in person.reasons" :key="reason">
+                  <i aria-hidden="true"></i>{{ reason }}
+                </small>
+              </span>
+              <button
+                type="button"
+                :disabled="requestedMatchIds.has(person.id)"
+                @click="openMatchRequest(person)"
+              >{{ requestedMatchIds.has(person.id) ? '已发出' : '表明来意' }}</button>
+            </footer>
+          </article>
+        </section>
+      </template>
+
+      <div
+        v-if="isMatchSheetOpen && selectedMatchPerson"
+        class="application-sheet-backdrop"
+        @click.self="closeMatchRequest"
+      >
+        <section class="application-sheet" role="dialog" aria-modal="true" aria-labelledby="match-sheet-title">
+          <div class="application-sheet-handle" aria-hidden="true"></div>
+
+          <template v-if="!matchRequestSubmitted">
+            <header class="application-sheet-header">
+              <div>
+                <h2 id="match-sheet-title">发起个人匹配</h2>
+                <p>先表明来意，对方同意后才能联系</p>
+              </div>
+              <button type="button" aria-label="关闭匹配窗口" @click="closeMatchRequest">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"></path></svg>
+              </button>
+            </header>
+
+            <div class="match-request-person">
+              <span class="matching-person-avatar" aria-hidden="true">{{ selectedMatchPerson.avatar }}</span>
+              <span>
+                <strong>{{ selectedMatchPerson.name }}</strong>
+                <small>{{ selectedMatchPerson.college }} · {{ selectedMatchPerson.roleLabel }}</small>
+              </span>
+              <em>{{ selectedMatchPerson.score }}% 匹配</em>
+            </div>
+
+            <form class="application-form" @submit.prevent="submitMatchRequest">
+              <label class="application-note-field">
+                <span>你的来意 <small>必填</small></span>
+                <textarea
+                  v-model="matchIntent"
+                  maxlength="180"
+                  placeholder="例如：想请教科研方向、交流项目经验，或邀请对方一起共创"
+                ></textarea>
+                <small>{{ matchIntent.length }}/180</small>
+              </label>
+
+              <label class="application-profile-toggle">
+                <span>
+                  <strong>发送个人说明</strong>
+                  <small>帮助对方了解你的经历，可在“我的”中编辑</small>
+                </span>
+                <input v-model="shouldSendMatchProfile" type="checkbox" />
+                <i aria-hidden="true"></i>
+              </label>
+
+              <div class="application-dingtalk-note">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 5 6v5c0 4.8 2.8 8.2 7 10 4.2-1.8 7-5.2 7-10V6z"></path><path d="m9 12 2 2 4-5"></path></svg>
+                <span>对方同意后，你们才可以通过钉钉联系</span>
+              </div>
+
+              <button class="application-submit-button" type="submit" :disabled="!matchIntent.trim()">
+                发送匹配请求
+              </button>
+            </form>
+          </template>
+
+          <div v-else class="application-success" role="status">
+            <div class="application-success-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24"><path d="m6 12 4 4 8-9"></path></svg>
+            </div>
+            <h2 id="match-sheet-title">匹配请求已发送</h2>
+            <p>可在“申请－我发出的”中查看进度，对方同意后即可联系。</p>
+            <button type="button" @click="closeMatchRequest">完成</button>
+          </div>
+        </section>
+      </div>
+    </main>
+
+    <main v-else-if="activeMobileSection === 'publish'" class="publish-page" aria-label="发布校园机会">
       <header class="publish-page-header">
         <div>
           <small>CREATE OPPORTUNITY</small>
@@ -651,6 +1378,301 @@ onMounted(loadOpportunities);
       </form>
     </main>
 
+    <main v-else-if="activeMobileSection === 'profile'" class="profile-page" aria-label="我的">
+      <template v-if="profilePanel === 'overview'">
+        <section class="profile-identity-card">
+          <span class="profile-large-avatar" aria-hidden="true">林</span>
+          <div class="profile-identity-copy">
+            <h2>林同学</h2>
+            <p>人工智能学院 · 2027 届本科生</p>
+          </div>
+          <button type="button" aria-label="编辑基本资料">›</button>
+        </section>
+
+        <section class="profile-data-strip" aria-label="我的校园数据">
+          <button type="button" @click="selectProfilePanel('published')"><strong>{{ profilePublications.length }}</strong><span>我的发布</span></button>
+          <i aria-hidden="true"></i>
+          <button type="button" @click="selectProfilePanel('applications')"><strong>{{ applicationRecords.length }}</strong><span>我的申请</span></button>
+          <i aria-hidden="true"></i>
+          <button type="button"><strong>{{ savedOpportunityIds.size }}</strong><span>我的收藏</span></button>
+        </section>
+
+        <section class="profile-resume-card">
+          <header>
+            <span>
+              <small>用于机会申请与个人匹配</small>
+              <h2>个人说明</h2>
+            </span>
+            <button type="button" @click="openProfileEditor">编辑</button>
+          </header>
+          <div class="profile-completion">
+            <span><strong>资料完善度</strong><small>82%</small></span>
+            <i><b></b></i>
+          </div>
+          <div class="profile-resume-body">
+            <strong>{{ personalProfile.headline }}</strong>
+            <p>{{ personalProfile.introduction }}</p>
+            <div class="profile-skill-tags" aria-label="个人能力标签">
+              <span v-for="tag in personalProfile.tags" :key="tag">{{ tag }}</span>
+            </div>
+            <div class="profile-availability">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle><path d="M12 7v5l3 2"></path></svg>
+              <span>{{ personalProfile.availability }}</span>
+            </div>
+          </div>
+        </section>
+
+        <section class="profile-menu-card" aria-label="我的内容">
+          <button type="button">
+            <span class="profile-menu-icon icon-saved"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3 2.8 5.7 6.2.9-4.5 4.4 1.1 6.2-5.6-3-5.6 3 1.1-6.2L3 9.6l6.2-.9z"></path></svg></span>
+            <span><strong>收藏的机会</strong><small>稍后继续了解感兴趣的机会</small></span>
+            <em>{{ savedOpportunityIds.size }}</em><b>›</b>
+          </button>
+          <button type="button" @click="selectProfilePanel('published')">
+            <span class="profile-menu-icon icon-published"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="5" width="16" height="15" rx="2"></rect><path d="M8 3v4M16 3v4M8 11h8M8 15h5"></path></svg></span>
+            <span><strong>发布与草稿</strong><small>管理已发布机会和未完成草稿</small></span>
+            <em>{{ profilePublications.length }}</em><b>›</b>
+          </button>
+        </section>
+
+        <section class="profile-menu-card profile-settings-card" aria-label="账户与服务">
+          <button type="button">
+            <span class="profile-menu-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 5 6v5c0 4.8 2.8 8.2 7 10 4.2-1.8 7-5.2 7-10V6z"></path><path d="m9 12 2 2 4-5"></path></svg></span>
+            <span><strong>隐私与联系设置</strong><small>管理个人资料与联系方式</small></span>
+            <b>›</b>
+          </button>
+          <button type="button">
+            <span class="profile-menu-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle><path d="M9.8 9a2.4 2.4 0 1 1 3.3 2.2c-.8.4-1.1.9-1.1 1.8M12 17h.01"></path></svg></span>
+            <span><strong>帮助与反馈</strong><small>使用问题、举报与产品建议</small></span>
+            <b>›</b>
+          </button>
+        </section>
+      </template>
+
+      <template v-else-if="profilePanel === 'published'">
+        <header class="profile-subpage-header">
+          <button type="button" aria-label="返回我的" @click="selectProfilePanel('overview')">‹</button>
+          <span><h1>我的发布</h1><small>编辑已发布机会与草稿</small></span>
+        </header>
+        <section class="profile-manage-list">
+          <article v-for="item in profilePublications" :key="item.id" class="profile-manage-card">
+            <header><span>{{ item.category }}</span><em :class="{ draft: item.status === '草稿' }">{{ item.status }}</em></header>
+            <h2>{{ item.title }}</h2>
+            <p>{{ item.summary }}</p>
+            <div><span>{{ item.deadline }} 截止</span><span>{{ item.applicants }} 人申请</span></div>
+            <footer>
+              <small>{{ item.status === '草稿' ? '完善后即可发布' : '修改后会更新展示内容' }}</small>
+              <button type="button" @click="openProfilePublicationEditor(item.id)">编辑发布</button>
+            </footer>
+          </article>
+        </section>
+      </template>
+
+      <template v-else>
+        <header class="profile-subpage-header">
+          <button type="button" aria-label="返回我的" @click="selectProfilePanel('overview')">‹</button>
+          <span><h1>我的申请</h1><small>待处理申请可以修改</small></span>
+        </header>
+        <section class="profile-manage-list">
+          <article v-for="item in applicationRecords" :key="item.id" class="profile-manage-card profile-application-manage-card">
+            <header>
+              <span :class="{ match: item.kind === 'match' }">{{ item.kind === 'match' ? '个人匹配' : '机会申请' }}</span>
+              <em :class="`status-${item.status}`">{{ item.statusText }}</em>
+            </header>
+            <h2>{{ item.title }}</h2>
+            <p>{{ profileApplicationNotes[item.id] || item.update }}</p>
+            <div><span>{{ item.college }}</span><span>{{ item.submittedAt }}</span></div>
+            <footer>
+              <small>{{ item.status === 'pending' ? '对方处理前可修改申请说明' : '该申请已被处理，不能再修改' }}</small>
+              <button v-if="item.status === 'pending'" type="button" @click="openProfileApplicationEditor(item.id)">修改申请</button>
+              <span v-else>仅查看</span>
+            </footer>
+          </article>
+        </section>
+      </template>
+
+      <div v-if="isProfileEditorOpen" class="application-sheet-backdrop" @click.self="closeProfileEditor">
+        <section class="application-sheet profile-editor-sheet" role="dialog" aria-modal="true" aria-labelledby="profile-editor-title">
+          <div class="application-sheet-handle" aria-hidden="true"></div>
+          <header class="application-sheet-header">
+            <div>
+              <h2 id="profile-editor-title">编辑个人说明</h2>
+              <p>申请机会或发起匹配时，可选择发送这份说明</p>
+            </div>
+            <button type="button" aria-label="关闭个人说明编辑" @click="closeProfileEditor">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"></path></svg>
+            </button>
+          </header>
+          <form class="profile-editor-form" @submit.prevent="savePersonalProfile">
+            <label class="publish-field">
+              <span>个人方向 <small>必填</small></span>
+              <input v-model="profileDraft.headline" maxlength="32" placeholder="一句话说明你的方向" />
+            </label>
+            <label class="publish-field">
+              <span>个人介绍 <small>必填</small></span>
+              <textarea v-model="profileDraft.introduction" maxlength="240" placeholder="介绍你的经历、能力和想认识的人"></textarea>
+              <i>{{ profileDraft.introduction.length }}/240</i>
+            </label>
+            <label class="publish-field">
+              <span>能力标签</span>
+              <input v-model="profileDraft.tags" placeholder="用逗号或顿号分隔，最多 8 个" />
+            </label>
+            <label class="publish-field">
+              <span>可投入时间</span>
+              <input v-model="profileDraft.availability" placeholder="例如：每周可投入 6–8 小时" />
+            </label>
+            <p v-if="profileSaveMessage" class="profile-save-message" role="status">{{ profileSaveMessage }}</p>
+            <button class="application-submit-button" type="submit">保存个人说明</button>
+          </form>
+        </section>
+      </div>
+
+      <div v-if="isProfilePublicationEditorOpen" class="application-sheet-backdrop" @click.self="closeProfilePublicationEditor">
+        <section class="application-sheet profile-editor-sheet" role="dialog" aria-modal="true" aria-labelledby="publication-editor-title">
+          <div class="application-sheet-handle" aria-hidden="true"></div>
+          <header class="application-sheet-header">
+            <div><h2 id="publication-editor-title">编辑发布</h2><p>修改后会同步更新这条校园机会</p></div>
+            <button type="button" aria-label="关闭发布编辑" @click="closeProfilePublicationEditor"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"></path></svg></button>
+          </header>
+          <form class="profile-editor-form" @submit.prevent="saveProfilePublication">
+            <label class="publish-field"><span>机会标题 <small>必填</small></span><input v-model="profilePublicationDraft.title" maxlength="60" /></label>
+            <label class="publish-field"><span>机会介绍 <small>必填</small></span><textarea v-model="profilePublicationDraft.summary" maxlength="300"></textarea><i>{{ profilePublicationDraft.summary.length }}/300</i></label>
+            <label class="publish-field"><span>申请截止日期 <small>必填</small></span><input v-model="profilePublicationDraft.deadline" type="date" /></label>
+            <button class="application-submit-button" type="submit" :disabled="!profilePublicationDraft.title.trim() || !profilePublicationDraft.summary.trim() || !profilePublicationDraft.deadline">保存修改</button>
+          </form>
+        </section>
+      </div>
+
+      <div v-if="isProfileApplicationEditorOpen" class="application-sheet-backdrop" @click.self="closeProfileApplicationEditor">
+        <section class="application-sheet profile-editor-sheet" role="dialog" aria-modal="true" aria-labelledby="profile-application-editor-title">
+          <div class="application-sheet-handle" aria-hidden="true"></div>
+          <header class="application-sheet-header">
+            <div><h2 id="profile-application-editor-title">修改申请</h2><p>对方处理前可以更新申请说明</p></div>
+            <button type="button" aria-label="关闭申请编辑" @click="closeProfileApplicationEditor"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"></path></svg></button>
+          </header>
+          <form class="profile-editor-form" @submit.prevent="saveProfileApplication">
+            <label class="publish-field"><span>申请说明 <small>必填</small></span><textarea v-model="profileApplicationDraft" maxlength="240" placeholder="补充你希望参与的原因和相关经历"></textarea><i>{{ profileApplicationDraft.length }}/240</i></label>
+            <button class="application-submit-button" type="submit" :disabled="!profileApplicationDraft.trim()">保存修改</button>
+          </form>
+        </section>
+      </div>
+    </main>
+
+    <main v-else class="applications-page" aria-label="申请与匹配">
+      <section class="application-role-switch" aria-label="申请身份切换">
+        <button
+          type="button"
+          :class="{ active: applicationViewRole === 'applicant' }"
+          :aria-pressed="applicationViewRole === 'applicant'"
+          @click="selectApplicationViewRole('applicant')"
+        >
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3h9l3 3v15H6z"></path><path d="M14 3v4h4M9 13l2 2 4-5"></path></svg>
+          <span><strong>我发出的</strong><small>申请与匹配请求</small></span>
+        </button>
+        <button
+          type="button"
+          :class="{ active: applicationViewRole === 'publisher' }"
+          :aria-pressed="applicationViewRole === 'publisher'"
+          @click="selectApplicationViewRole('publisher')"
+        >
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 19v-2.2c0-2 1.7-3.8 4-3.8h2M8 10a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM14 6h6M17 3v6M14 14h6M14 18h6"></path></svg>
+          <span><strong>我收到的</strong><small>等待我处理的请求</small></span>
+        </button>
+      </section>
+
+      <section class="application-status-tabs" role="tablist" aria-label="申请状态筛选">
+        <button
+          v-for="(label, status) in currentApplicationStatusLabels"
+          :key="status"
+          type="button"
+          role="tab"
+          :aria-selected="selectedApplicationStatus === status"
+          :class="{ active: selectedApplicationStatus === status }"
+          @click="selectedApplicationStatus = status"
+        >
+          {{ label }}
+        </button>
+      </section>
+
+      <section v-if="applicationViewRole === 'applicant'" class="application-record-list" aria-live="polite">
+        <article v-for="item in filteredApplicationRecords" :key="item.id" class="application-record-card">
+          <div class="application-record-top">
+            <span class="application-record-category" :class="{ 'source-match': item.kind === 'match' }">
+              {{ item.kind === 'match' ? '个人匹配' : '机会申请' }}
+            </span>
+            <span class="application-record-time">发出于 {{ item.submittedAt }}</span>
+            <strong :class="`status-${item.status}`">{{ item.statusText }}</strong>
+          </div>
+
+          <h2>{{ item.title }}</h2>
+          <p class="application-record-college">{{ item.college }}</p>
+
+          <div class="application-record-update" :class="`status-${item.status}`">
+            <i aria-hidden="true"></i>
+            <span>{{ item.update }}</span>
+          </div>
+
+          <footer>
+            <button type="button">{{ item.kind === 'match' ? '查看来意' : '查看申请' }}</button>
+            <button v-if="item.status === 'approved'" class="application-contact-button" type="button">
+              {{ item.kind === 'match' ? '联系对方' : '联系发起人' }}
+            </button>
+            <span v-else-if="item.status === 'pending'">对方处理后会通知你</span>
+            <span v-else>请求记录已归档</span>
+          </footer>
+        </article>
+
+        <div v-if="filteredApplicationRecords.length === 0" class="application-record-empty">
+          <strong>暂无相关申请</strong>
+          <span>该状态下还没有申请记录。</span>
+        </div>
+      </section>
+
+      <section v-else class="application-record-list publisher-application-list" aria-live="polite">
+        <article v-for="item in filteredPublisherApplicationRecords" :key="item.id" class="application-record-card publisher-application-card">
+          <div class="application-record-top">
+            <span class="application-record-category" :class="{ 'source-match': item.kind === 'match' }">
+              {{ item.kind === 'match' ? '个人匹配' : '机会申请' }}
+            </span>
+            <span class="application-record-time">收到于 {{ item.submittedAt }}</span>
+            <strong :class="`status-${item.status}`">{{ item.statusText }}</strong>
+          </div>
+
+          <div class="publisher-applicant-profile">
+            <span class="publisher-applicant-avatar" aria-hidden="true">{{ item.avatar }}</span>
+            <span>
+              <strong>{{ item.applicant }}</strong>
+              <small>{{ item.college }}</small>
+            </span>
+            <em v-if="item.hasProfile">附个人说明</em>
+          </div>
+
+          <p class="publisher-application-target">{{ item.kind === 'match' ? '来意' : '申请' }}：{{ item.opportunity }}</p>
+
+          <div class="publisher-application-tags">
+            <span v-for="tag in item.tags" :key="tag">{{ tag }}</span>
+          </div>
+
+          <blockquote>{{ item.note }}</blockquote>
+
+          <footer>
+            <button type="button">{{ item.hasProfile ? '查看个人说明' : '查看详情' }}</button>
+            <span v-if="item.status === 'pending'" class="publisher-pending-actions">
+              <button type="button" @click="updatePublisherApplicationStatus(item.id, 'closed')">{{ item.kind === 'match' ? '婉拒' : '暂不合适' }}</button>
+              <button type="button" @click="updatePublisherApplicationStatus(item.id, 'approved')">{{ item.kind === 'match' ? '同意匹配' : '通过申请' }}</button>
+            </span>
+            <button v-else-if="item.status === 'approved'" class="application-contact-button" type="button">{{ item.kind === 'match' ? '联系对方' : '联系申请者' }}</button>
+            <span v-else>请求已归档</span>
+          </footer>
+        </article>
+
+        <div v-if="filteredPublisherApplicationRecords.length === 0" class="application-record-empty">
+          <strong>暂无相关申请</strong>
+          <span>该状态下还没有收到申请。</span>
+        </div>
+      </section>
+    </main>
+
     <nav class="mobile-nav" aria-label="移动端导航">
       <a :class="{ active: activeMobileSection === 'opportunities' }" href="#opportunities" @click.prevent="selectMobileSection('opportunities')">
         <span class="nav-icon" aria-hidden="true">
@@ -658,7 +1680,7 @@ onMounted(loadOpportunities);
         </span>
         <span class="nav-label">机会</span>
       </a>
-      <a href="#matching">
+      <a :class="{ active: activeMobileSection === 'matching' }" href="#matching" @click.prevent="selectMobileSection('matching')">
         <span class="nav-icon" aria-hidden="true">
           <svg viewBox="0 0 24 24"><circle cx="8" cy="8" r="3"></circle><circle cx="16" cy="8" r="3"></circle><path d="M3 19c.5-3 2.2-5 5-5 1.8 0 3.1.8 4 2M12 16c.9-1.2 2.2-2 4-2 2.8 0 4.5 2 5 5"></path></svg>
         </span>
@@ -670,13 +1692,13 @@ onMounted(loadOpportunities);
         </span>
         <span class="nav-label">发布</span>
       </a>
-      <a href="#applications">
+      <a :class="{ active: activeMobileSection === 'applications' }" href="#applications" @click.prevent="selectMobileSection('applications')">
         <span class="nav-icon" aria-hidden="true">
           <svg viewBox="0 0 24 24"><path d="M6 3h9l3 3v15H6z"></path><path d="M14 3v4h4M9 13l2 2 4-5"></path></svg>
         </span>
         <span class="nav-label">申请</span>
       </a>
-      <a href="#profile">
+      <a :class="{ active: activeMobileSection === 'profile' }" href="#profile" @click.prevent="selectMobileSection('profile')">
         <span class="nav-icon" aria-hidden="true">
           <svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"></circle><path d="M4.5 20c.8-4 3.3-6 7.5-6s6.7 2 7.5 6"></path></svg>
         </span>
