@@ -7,7 +7,7 @@ type ApplicationStatus = 'all' | 'pending' | 'approved' | 'closed';
 type ApplicationViewRole = 'applicant' | 'publisher';
 type MatchRole = 'teacher' | 'student';
 type MatchStage = 'idle' | 'matching' | 'results';
-type ProfilePanel = 'overview' | 'published' | 'applications';
+type ProfilePanel = 'overview' | 'published' | 'applications' | 'settings';
 
 const MATCH_DAILY_LIMIT = 3;
 
@@ -20,13 +20,21 @@ function getLocalDayKey() {
 
 function loadDailyMatchCount() {
   try {
-    const stored = JSON.parse(localStorage.getItem('campus-match-daily-usage-v1') || '{}') as {
+    const stored = JSON.parse(localStorage.getItem('campus-match-daily-usage-v3') || '{}') as {
       date?: string;
       count?: number;
     };
     return stored.date === getLocalDayKey() ? Math.min(stored.count || 0, MATCH_DAILY_LIMIT) : 0;
   } catch {
     return 0;
+  }
+}
+
+function loadMatchingEnabled() {
+  try {
+    return localStorage.getItem('campus-matching-enabled-v1') !== 'false';
+  } catch {
+    return true;
   }
 }
 
@@ -55,7 +63,7 @@ interface MatchPerson {
   focus: string;
   introduction: string;
   tags: string[];
-  reasons: string[];
+  availability: string;
   score: number;
 }
 
@@ -192,7 +200,7 @@ const matchPeople: MatchPerson[] = [
     focus: '大模型应用与人机协作',
     introduction: '关注大模型在教育与校园服务中的落地，指导过多项学生创新项目。',
     tags: ['大模型应用', '科研入门', '项目指导'],
-    reasons: ['研究方向相关', '有学生项目指导经验'],
+    availability: '每周可交流 2 小时',
     score: 92,
   },
   {
@@ -205,7 +213,7 @@ const matchPeople: MatchPerson[] = [
     focus: '前端工程与智能交互',
     introduction: '研究智能交互与软件工程，愿意为校内技术实践提供方法建议。',
     tags: ['智能交互', '软件工程', '技术实践'],
-    reasons: ['技能方向重合', '近期开放交流'],
+    availability: '每周可交流 1–2 小时',
     score: 87,
   },
   {
@@ -218,7 +226,7 @@ const matchPeople: MatchPerson[] = [
     focus: '创新项目孵化与成果转化',
     introduction: '长期指导学生创新创业项目，关注真实需求验证与跨学院团队协作。',
     tags: ['项目孵化', '需求验证', '团队指导'],
-    reasons: ['项目阶段契合', '跨学科指导经验'],
+    availability: '每两周可交流 1 次',
     score: 85,
   },
   {
@@ -231,7 +239,7 @@ const matchPeople: MatchPerson[] = [
     focus: '产品设计与用户研究',
     introduction: '正在寻找校园产品共创伙伴，擅长原型设计、访谈和移动端体验。',
     tags: ['产品设计', 'Figma', '用户调研'],
-    reasons: ['互补能力突出', '共同关注校园产品'],
+    availability: '每周可投入 6–8 小时',
     score: 90,
   },
   {
@@ -244,7 +252,7 @@ const matchPeople: MatchPerson[] = [
     focus: '创新创业与商业分析',
     introduction: '有挑战杯和创业项目经验，希望认识技术伙伴共同验证校园需求。',
     tags: ['商业分析', '挑战杯', '创业实践'],
-    reasons: ['项目目标相近', '经历可以互补'],
+    availability: '每周可投入 4–6 小时',
     score: 84,
   },
   {
@@ -257,7 +265,7 @@ const matchPeople: MatchPerson[] = [
     focus: 'Vue 3 与小程序开发',
     introduction: '参与过两个校内服务小程序，希望寻找重视用户体验的长期项目。',
     tags: ['Vue 3', '小程序', 'TypeScript'],
-    reasons: ['技术栈高度相关', '可投入时间匹配'],
+    availability: '每周可投入 8 小时',
     score: 88,
   },
   {
@@ -270,7 +278,7 @@ const matchPeople: MatchPerson[] = [
     focus: '智能体应用与模型评测',
     introduction: '正在研究校园场景中的智能体应用，希望认识产品和前端方向的合作伙伴。',
     tags: ['AI Agent', '模型评测', 'Python'],
-    reasons: ['研究主题相关', '合作角色互补'],
+    availability: '每周可投入 5–7 小时',
     score: 86,
   },
 ];
@@ -314,11 +322,13 @@ const initialMobileSection: MobileSection = window.location.hash === '#publish'
     ? 'profile'
     : 'opportunities';
 const activeMobileSection = ref<MobileSection>(initialMobileSection);
+const isMatchingEnabled = ref(loadMatchingEnabled());
 const matchStage = ref<MatchStage>('idle');
 const matchDailyCount = ref(loadDailyMatchCount());
 const matchAnimationMessage = ref('正在读取你的方向与个人说明');
 const roundMatchPeople = ref<MatchPerson[]>([]);
-const selectedMatchRole = ref<MatchRole>('teacher');
+const activeMatchCardIndex = ref(0);
+const matchingPersonList = ref<HTMLElement | null>(null);
 const selectedMatchPerson = ref<MatchPerson | null>(null);
 const requestedMatchIds = ref<Set<string>>(new Set(['teacher-wu']));
 const isMatchSheetOpen = ref(false);
@@ -339,6 +349,13 @@ const publishForm = ref({
   tags: '',
 });
 const publishFormMessage = ref('');
+const currentUserIdentity = {
+  name: '林同学',
+  avatar: '林',
+  role: 'student' as MatchRole,
+  roleLabel: '2027 届本科生',
+  college: '人工智能学院',
+};
 const personalProfile = ref({
   headline: '校园 AI 产品与前端实践者',
   introduction: '关注校园场景中的 AI 产品，正在学习 Vue 3、TypeScript 与用户调研，希望认识愿意长期共创的老师和同学。',
@@ -351,6 +368,7 @@ const profileDraft = ref({
   tags: '',
   availability: '',
 });
+const profileDraftTags = computed(() => splitProfileTags(profileDraft.value.tags));
 const isProfileEditorOpen = ref(false);
 const profileSaveMessage = ref('');
 const profilePanel = ref<ProfilePanel>('overview');
@@ -394,9 +412,7 @@ const filteredApplicationRecords = computed(() => {
   return applicationRecords.value.filter((item) => item.status === selectedApplicationStatus.value);
 });
 
-const filteredMatchPeople = computed(() =>
-  roundMatchPeople.value.filter((person) => person.role === selectedMatchRole.value),
-);
+const filteredMatchPeople = computed(() => roundMatchPeople.value);
 
 const matchRemainingCount = computed(() =>
   Math.max(0, MATCH_DAILY_LIMIT - matchDailyCount.value),
@@ -447,8 +463,31 @@ function clearMatchAnimationTimers() {
   matchAnimationTimers = [];
 }
 
+function updateActiveMatchCard() {
+  const list = matchingPersonList.value;
+  if (!list) return;
+
+  const cards = Array.from(list.querySelectorAll<HTMLElement>('.matching-person-card'));
+  if (cards.length === 0) return;
+
+  activeMatchCardIndex.value = cards.reduce((closestIndex, card, index) => {
+    const currentDistance = Math.abs(cards[closestIndex]!.offsetLeft - list.scrollLeft);
+    const nextDistance = Math.abs(card.offsetLeft - list.scrollLeft);
+    return nextDistance < currentDistance ? index : closestIndex;
+  }, 0);
+}
+
+function goToMatchCard(index: number) {
+  const list = matchingPersonList.value;
+  const card = list?.querySelectorAll<HTMLElement>('.matching-person-card')[index];
+  if (!list || !card) return;
+
+  activeMatchCardIndex.value = index;
+  list.scrollTo({ left: card.offsetLeft, behavior: 'smooth' });
+}
+
 function startMatchRound() {
-  if (matchRemainingCount.value === 0) return;
+  if (!isMatchingEnabled.value || matchRemainingCount.value === 0) return;
 
   clearMatchAnimationTimers();
   const nextRound = matchDailyCount.value + 1;
@@ -457,7 +496,7 @@ function startMatchRound() {
 
   matchStage.value = 'matching';
   matchAnimationMessage.value = '正在读取你的方向与个人说明';
-  selectedMatchRole.value = 'teacher';
+  activeMatchCardIndex.value = 0;
   window.scrollTo(0, 0);
 
   matchAnimationTimers.push(
@@ -473,7 +512,7 @@ function startMatchRound() {
         ...takeRoundMatches('student', 3, nextRound),
       ];
       matchDailyCount.value = nextRound;
-      localStorage.setItem('campus-match-daily-usage-v1', JSON.stringify({
+      localStorage.setItem('campus-match-daily-usage-v3', JSON.stringify({
         date: getLocalDayKey(),
         count: matchDailyCount.value,
       }));
@@ -533,6 +572,25 @@ function selectProfilePanel(panel: ProfilePanel) {
   window.scrollTo(0, 0);
 }
 
+function openMatchingSettings() {
+  selectMobileSection('profile');
+  profilePanel.value = 'settings';
+}
+
+function toggleMatchingEnabled() {
+  isMatchingEnabled.value = !isMatchingEnabled.value;
+  localStorage.setItem('campus-matching-enabled-v1', String(isMatchingEnabled.value));
+
+  if (!isMatchingEnabled.value) {
+    clearMatchAnimationTimers();
+    matchStage.value = 'idle';
+    roundMatchPeople.value = [];
+    activeMatchCardIndex.value = 0;
+    selectedMatchPerson.value = null;
+    isMatchSheetOpen.value = false;
+  }
+}
+
 function openProfileEditor() {
   profileDraft.value = {
     headline: personalProfile.value.headline,
@@ -542,6 +600,14 @@ function openProfileEditor() {
   };
   profileSaveMessage.value = '';
   isProfileEditorOpen.value = true;
+}
+
+function splitProfileTags(value: string) {
+  return value
+    .split(/[、,，]/)
+    .map((tag) => tag.trim())
+    .filter(Boolean)
+    .slice(0, 8);
 }
 
 function closeProfileEditor() {
@@ -558,7 +624,7 @@ function savePersonalProfile() {
   personalProfile.value = {
     headline: draft.headline.trim(),
     introduction: draft.introduction.trim(),
-    tags: draft.tags.split(/[、,，]/).map((tag) => tag.trim()).filter(Boolean).slice(0, 8),
+    tags: splitProfileTags(draft.tags),
     availability: draft.availability.trim() || '投入时间待补充',
   };
   profileSaveMessage.value = '个人说明已更新';
@@ -1107,7 +1173,17 @@ onBeforeUnmount(clearMatchAnimationTimers);
     </main>
 
     <main v-else-if="activeMobileSection === 'matching'" class="matching-page" aria-label="AI 个人匹配">
-      <section v-if="matchStage === 'idle'" class="matching-start-card">
+      <section v-if="!isMatchingEnabled" class="matching-state-page matching-start-card matching-disabled-card">
+        <div class="matching-disabled-visual" aria-hidden="true">
+          <svg viewBox="0 0 24 24"><path d="M8 11V8a4 4 0 0 1 7.5-2M7 11h10a2 2 0 0 1 2 2v6H5v-6a2 2 0 0 1 2-2Z"></path><path d="m4 4 16 16"></path></svg>
+        </div>
+        <small>MATCHING PAUSED</small>
+        <h1>匹配功能已关闭</h1>
+        <p>你的个人卡片不会出现在其他人的匹配结果中，当前也无法开始新的匹配。</p>
+        <button type="button" @click="openMatchingSettings">前往设置</button>
+      </section>
+
+      <section v-else-if="matchStage === 'idle'" class="matching-state-page matching-start-card">
         <div class="matching-start-visual" aria-hidden="true">
           <span class="matching-start-orbit orbit-one"></span>
           <span class="matching-start-orbit orbit-two"></span>
@@ -1121,16 +1197,21 @@ onBeforeUnmount(clearMatchAnimationTimers);
         <small>AI PERSON MATCHING</small>
         <h1>开始一轮个人匹配</h1>
         <p>根据你的个人说明、能力方向和联系意愿，寻找值得请教或适合一起做事的人。</p>
+        <div class="matching-basis" aria-label="匹配依据">
+          <span><i aria-hidden="true"></i>个人说明</span>
+          <span><i aria-hidden="true"></i>能力方向</span>
+          <span><i aria-hidden="true"></i>联系意愿</span>
+        </div>
         <button type="button" :disabled="matchRemainingCount === 0" @click="startMatchRound">
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3 1.5 4.1L18 9l-4.5 1.9L12 15l-1.5-4.1L6 9l4.5-1.9z"></path></svg>
           {{ matchRemainingCount === 0 ? '今日次数已用完' : '开始匹配' }}
         </button>
         <small class="matching-start-note">
-          每天最多匹配 3 次 · 今日还可匹配 {{ matchRemainingCount }} 次
+          每天最多匹配 3 次 <i aria-hidden="true"></i> 今日还可匹配 <strong>{{ matchRemainingCount }}</strong> 次
         </small>
       </section>
 
-      <section v-else-if="matchStage === 'matching'" class="matching-animation-card" aria-live="polite" aria-busy="true">
+      <section v-else-if="matchStage === 'matching'" class="matching-state-page matching-animation-card" aria-live="polite" aria-busy="true">
         <div class="matching-radar" aria-hidden="true">
           <span class="matching-radar-ring ring-one"></span>
           <span class="matching-radar-ring ring-two"></span>
@@ -1148,66 +1229,45 @@ onBeforeUnmount(clearMatchAnimationTimers);
         <span class="matching-loading-dots" aria-hidden="true"><i></i><i></i><i></i></span>
       </section>
 
-      <template v-else>
-        <section class="matching-profile-brief matching-results-enter">
-          <span class="matching-profile-icon" aria-hidden="true">
-            <svg viewBox="0 0 24 24"><path d="m12 3 1.5 4.1L18 9l-4.5 1.9L12 15l-1.5-4.1L6 9l4.5-1.9z"></path><path d="m19 15 .8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8z"></path></svg>
-          </span>
-          <span>
-            <strong>匹配完成</strong>
-          </span>
-          <button
-            class="matching-rematch-button"
-            type="button"
-            :disabled="matchRemainingCount === 0"
-            @click="startMatchRound"
-          >{{ matchRemainingCount === 0 ? '今日次数已用完' : '再来一轮' }}</button>
-        </section>
-
-        <section class="matching-role-tabs matching-results-enter" role="tablist" aria-label="匹配对象类型">
-          <button
-            type="button"
-            role="tab"
-            :aria-selected="selectedMatchRole === 'teacher'"
-            :class="{ active: selectedMatchRole === 'teacher' }"
-            @click="selectedMatchRole = 'teacher'"
-          >推荐老师</button>
-          <button
-            type="button"
-            role="tab"
-            :aria-selected="selectedMatchRole === 'student'"
-            :class="{ active: selectedMatchRole === 'student' }"
-            @click="selectedMatchRole = 'student'"
-          >推荐同学</button>
-        </section>
-
-        <section class="matching-person-list matching-results-enter" aria-live="polite">
+      <section v-else class="matching-state-page matching-results-stage matching-results-enter">
+        <section
+          ref="matchingPersonList"
+          class="matching-person-list"
+          aria-live="polite"
+          @scroll.passive="updateActiveMatchCard"
+        >
           <article v-for="person in filteredMatchPeople" :key="person.id" class="matching-person-card">
             <header>
               <span class="matching-person-avatar" aria-hidden="true">{{ person.avatar }}</span>
               <span class="matching-person-identity">
-                <strong>{{ person.name }}</strong>
+                <span class="matching-person-name-row">
+                  <strong>{{ person.name }}</strong>
+                  <em :class="person.role">{{ person.role === 'teacher' ? '老师' : '学生' }}</em>
+                </span>
                 <small>{{ person.college }} · {{ person.roleLabel }}</small>
               </span>
               <span class="matching-score"><strong>{{ person.score }}%</strong><small>匹配度</small></span>
             </header>
 
-            <div class="matching-person-focus">
-              <small>关注方向</small>
-              <strong>{{ person.focus }}</strong>
-            </div>
-            <p>{{ person.introduction }}</p>
+            <div class="matching-person-body">
+              <div class="matching-person-focus">
+                <small>方向</small>
+                <strong>{{ person.focus }}</strong>
+              </div>
+              <p>{{ person.introduction }}</p>
 
-            <div class="matching-person-tags" aria-label="个人标签">
-              <span v-for="tag in person.tags" :key="tag">{{ tag }}</span>
+              <div class="matching-person-tags" aria-label="个人标签">
+                <span v-for="tag in person.tags" :key="tag">{{ tag }}</span>
+              </div>
+
+              <div class="matching-person-availability">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle><path d="M12 7v5l3 2"></path></svg>
+                <span>{{ person.availability }}</span>
+              </div>
             </div>
 
             <footer>
-              <span class="matching-reasons">
-                <small v-for="reason in person.reasons" :key="reason">
-                  <i aria-hidden="true"></i>{{ reason }}
-                </small>
-              </span>
+              <small>{{ requestedMatchIds.has(person.id) ? '等待对方回应' : '同意后即可联系' }}</small>
               <button
                 type="button"
                 :disabled="requestedMatchIds.has(person.id)"
@@ -1216,7 +1276,28 @@ onBeforeUnmount(clearMatchAnimationTimers);
             </footer>
           </article>
         </section>
-      </template>
+
+        <nav class="matching-carousel-pagination matching-results-enter" aria-label="匹配结果页码">
+          <span>
+            <button
+              v-for="(_, index) in filteredMatchPeople"
+              :key="index"
+              type="button"
+              :class="{ active: activeMatchCardIndex === index }"
+              :aria-label="`查看第 ${index + 1} 位匹配对象`"
+              @click="goToMatchCard(index)"
+            ></button>
+          </span>
+          <small>左右滑动查看 {{ activeMatchCardIndex + 1 }}/{{ filteredMatchPeople.length }}</small>
+        </nav>
+
+        <button
+          class="matching-rematch-button"
+          type="button"
+          :disabled="matchRemainingCount === 0"
+          @click="startMatchRound"
+        >{{ matchRemainingCount === 0 ? '今日次数已用完' : '再来一轮' }}</button>
+      </section>
 
       <div
         v-if="isMatchSheetOpen && selectedMatchPerson"
@@ -1381,12 +1462,16 @@ onBeforeUnmount(clearMatchAnimationTimers);
     <main v-else-if="activeMobileSection === 'profile'" class="profile-page" aria-label="我的">
       <template v-if="profilePanel === 'overview'">
         <section class="profile-identity-card">
-          <span class="profile-large-avatar" aria-hidden="true">林</span>
+          <span class="profile-large-avatar" aria-hidden="true">{{ currentUserIdentity.avatar }}</span>
           <div class="profile-identity-copy">
-            <h2>林同学</h2>
-            <p>人工智能学院 · 2027 届本科生</p>
+            <h2>{{ currentUserIdentity.name }}</h2>
+            <p>{{ currentUserIdentity.college }} · {{ currentUserIdentity.roleLabel }}</p>
           </div>
           <button type="button" aria-label="编辑基本资料">›</button>
+          <div class="profile-level-bar" aria-label="校园成长等级">
+            <span><small>校园成长等级</small><strong>Lv.3 共创者</strong></span>
+            <div><i><b></b></i><small>68%</small></div>
+          </div>
         </section>
 
         <section class="profile-data-strip" aria-label="我的校园数据">
@@ -1400,10 +1485,10 @@ onBeforeUnmount(clearMatchAnimationTimers);
         <section class="profile-resume-card">
           <header>
             <span>
-              <small>用于机会申请与个人匹配</small>
+              <small>以下内容会直接展示在匹配卡片中</small>
               <h2>个人说明</h2>
             </span>
-            <button type="button" @click="openProfileEditor">编辑</button>
+            <button type="button" @click="openProfileEditor">编辑卡片</button>
           </header>
           <div class="profile-completion">
             <span><strong>资料完善度</strong><small>82%</small></span>
@@ -1422,28 +1507,15 @@ onBeforeUnmount(clearMatchAnimationTimers);
           </div>
         </section>
 
-        <section class="profile-menu-card" aria-label="我的内容">
-          <button type="button">
-            <span class="profile-menu-icon icon-saved"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3 2.8 5.7 6.2.9-4.5 4.4 1.1 6.2-5.6-3-5.6 3 1.1-6.2L3 9.6l6.2-.9z"></path></svg></span>
-            <span><strong>收藏的机会</strong><small>稍后继续了解感兴趣的机会</small></span>
-            <em>{{ savedOpportunityIds.size }}</em><b>›</b>
-          </button>
-          <button type="button" @click="selectProfilePanel('published')">
-            <span class="profile-menu-icon icon-published"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="5" width="16" height="15" rx="2"></rect><path d="M8 3v4M16 3v4M8 11h8M8 15h5"></path></svg></span>
-            <span><strong>发布与草稿</strong><small>管理已发布机会和未完成草稿</small></span>
-            <em>{{ profilePublications.length }}</em><b>›</b>
-          </button>
-        </section>
-
         <section class="profile-menu-card profile-settings-card" aria-label="账户与服务">
-          <button type="button">
-            <span class="profile-menu-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 5 6v5c0 4.8 2.8 8.2 7 10 4.2-1.8 7-5.2 7-10V6z"></path><path d="m9 12 2 2 4-5"></path></svg></span>
-            <span><strong>隐私与联系设置</strong><small>管理个人资料与联系方式</small></span>
+          <button type="button" @click="selectProfilePanel('settings')">
+            <span class="profile-menu-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1-2.8 2.8-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.6v.2h-4V21a1.7 1.7 0 0 0-1-1.6 1.7 1.7 0 0 0-1.9.3l-.1.1L4.2 17l.1-.1a1.7 1.7 0 0 0 .3-1.9A1.7 1.7 0 0 0 3 14H2.8v-4H3a1.7 1.7 0 0 0 1.6-1 1.7 1.7 0 0 0-.3-1.9L4.2 7 7 4.2l.1.1A1.7 1.7 0 0 0 9 4.6a1.7 1.7 0 0 0 1-1.6v-.2h4V3a1.7 1.7 0 0 0 1 1.6 1.7 1.7 0 0 0 1.9-.3l.1-.1L19.8 7l-.1.1a1.7 1.7 0 0 0-.3 1.9 1.7 1.7 0 0 0 1.6 1h.2v4H21a1.7 1.7 0 0 0-1.6 1Z"></path></svg></span>
+            <span><strong>设置</strong></span>
             <b>›</b>
           </button>
           <button type="button">
             <span class="profile-menu-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle><path d="M9.8 9a2.4 2.4 0 1 1 3.3 2.2c-.8.4-1.1.9-1.1 1.8M12 17h.01"></path></svg></span>
-            <span><strong>帮助与反馈</strong><small>使用问题、举报与产品建议</small></span>
+            <span><strong>帮助与反馈</strong></span>
             <b>›</b>
           </button>
         </section>
@@ -1452,7 +1524,7 @@ onBeforeUnmount(clearMatchAnimationTimers);
       <template v-else-if="profilePanel === 'published'">
         <header class="profile-subpage-header">
           <button type="button" aria-label="返回我的" @click="selectProfilePanel('overview')">‹</button>
-          <span><h1>我的发布</h1><small>编辑已发布机会与草稿</small></span>
+          <span><h1>我的发布</h1></span>
         </header>
         <section class="profile-manage-list">
           <article v-for="item in profilePublications" :key="item.id" class="profile-manage-card">
@@ -1468,10 +1540,10 @@ onBeforeUnmount(clearMatchAnimationTimers);
         </section>
       </template>
 
-      <template v-else>
+      <template v-else-if="profilePanel === 'applications'">
         <header class="profile-subpage-header">
           <button type="button" aria-label="返回我的" @click="selectProfilePanel('overview')">‹</button>
-          <span><h1>我的申请</h1><small>待处理申请可以修改</small></span>
+          <span><h1>我的申请</h1></span>
         </header>
         <section class="profile-manage-list">
           <article v-for="item in applicationRecords" :key="item.id" class="profile-manage-card profile-application-manage-card">
@@ -1491,18 +1563,69 @@ onBeforeUnmount(clearMatchAnimationTimers);
         </section>
       </template>
 
+      <template v-else>
+        <header class="profile-subpage-header">
+          <button type="button" aria-label="返回我的" @click="selectProfilePanel('overview')">‹</button>
+          <span><h1>设置</h1></span>
+        </header>
+        <section class="profile-preference-card" aria-label="匹配设置">
+          <div class="profile-preference-copy">
+            <strong>开启个人匹配</strong>
+            <small>{{ isMatchingEnabled ? '其他师生可以在匹配中找到你' : '你的卡片已停止参与匹配' }}</small>
+          </div>
+          <button
+            class="profile-switch"
+            type="button"
+            role="switch"
+            :aria-checked="isMatchingEnabled"
+            :aria-label="isMatchingEnabled ? '关闭个人匹配' : '开启个人匹配'"
+            :class="{ active: isMatchingEnabled }"
+            @click="toggleMatchingEnabled"
+          ><i aria-hidden="true"></i></button>
+        </section>
+        <p class="profile-preference-note">关闭后，你不会被其他人匹配到，同时匹配页面也将暂停使用。</p>
+      </template>
+
       <div v-if="isProfileEditorOpen" class="application-sheet-backdrop" @click.self="closeProfileEditor">
         <section class="application-sheet profile-editor-sheet" role="dialog" aria-modal="true" aria-labelledby="profile-editor-title">
           <div class="application-sheet-handle" aria-hidden="true"></div>
           <header class="application-sheet-header">
             <div>
               <h2 id="profile-editor-title">编辑个人说明</h2>
-              <p>申请机会或发起匹配时，可选择发送这份说明</p>
+              <p>你填写的内容会同步成为匹配页展示卡片</p>
             </div>
             <button type="button" aria-label="关闭个人说明编辑" @click="closeProfileEditor">
               <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"></path></svg>
             </button>
           </header>
+          <section class="profile-match-card-preview" aria-label="匹配卡片实时预览">
+            <header>
+              <span class="matching-person-avatar" aria-hidden="true">{{ currentUserIdentity.avatar }}</span>
+              <span class="matching-person-identity">
+                <span class="matching-person-name-row">
+                  <strong>{{ currentUserIdentity.name }}</strong>
+                  <em :class="currentUserIdentity.role">{{ currentUserIdentity.role === 'teacher' ? '老师' : '学生' }}</em>
+                </span>
+                <small>{{ currentUserIdentity.college }} · {{ currentUserIdentity.roleLabel }}</small>
+              </span>
+              <small>实时预览</small>
+            </header>
+            <div class="profile-match-preview-body">
+              <div class="matching-person-focus">
+                <small>方向</small>
+                <strong>{{ profileDraft.headline.trim() || '填写你的个人方向' }}</strong>
+              </div>
+              <p>{{ profileDraft.introduction.trim() || '填写个人介绍后，将在这里展示你的经历、能力和希望认识的人。' }}</p>
+              <div v-if="profileDraftTags.length" class="matching-person-tags" aria-label="预览能力标签">
+                <span v-for="tag in profileDraftTags" :key="tag">{{ tag }}</span>
+              </div>
+              <div class="matching-person-availability">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle><path d="M12 7v5l3 2"></path></svg>
+                <span>{{ profileDraft.availability.trim() || '可投入时间待补充' }}</span>
+              </div>
+            </div>
+            <footer>匹配度由系统根据双方资料生成</footer>
+          </section>
           <form class="profile-editor-form" @submit.prevent="savePersonalProfile">
             <label class="publish-field">
               <span>个人方向 <small>必填</small></span>
