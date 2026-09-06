@@ -325,7 +325,8 @@ const activeMobileSection = ref<MobileSection>(initialMobileSection);
 const isMatchingEnabled = ref(loadMatchingEnabled());
 const matchStage = ref<MatchStage>('idle');
 const matchDailyCount = ref(loadDailyMatchCount());
-const matchAnimationMessage = ref('正在读取你的方向与个人说明');
+const matchRequirement = ref('');
+const matchAnimationMessage = ref('正在分析你的匹配需求');
 const roundMatchPeople = ref<MatchPerson[]>([]);
 const activeMatchCardIndex = ref(0);
 const matchingPersonList = ref<HTMLElement | null>(null);
@@ -495,16 +496,18 @@ function startMatchRound() {
   const stepDuration = reduceMotion ? 40 : 430;
 
   matchStage.value = 'matching';
-  matchAnimationMessage.value = '正在读取你的方向与个人说明';
+  matchAnimationMessage.value = matchRequirement.value.trim()
+    ? `正在分析“${matchRequirement.value.trim()}”`
+    : '正在分析你的匹配需求';
   activeMatchCardIndex.value = 0;
   window.scrollTo(0, 0);
 
   matchAnimationTimers.push(
     setTimeout(() => {
-      matchAnimationMessage.value = '正在寻找方向相近的老师和同学';
+      matchAnimationMessage.value = '正在寻找符合需求的老师和同学';
     }, stepDuration),
     setTimeout(() => {
-      matchAnimationMessage.value = '正在检查双方的联系意愿';
+      matchAnimationMessage.value = '正在确认双方匹配条件';
     }, stepDuration * 2),
     setTimeout(() => {
       roundMatchPeople.value = [
@@ -589,6 +592,13 @@ function toggleMatchingEnabled() {
     selectedMatchPerson.value = null;
     isMatchSheetOpen.value = false;
   }
+}
+
+function updateMatchRequirement(event: Event) {
+  const input = event.target as HTMLInputElement;
+  const nextValue = input.value.slice(0, 20);
+  matchRequirement.value = nextValue;
+  if (input.value !== nextValue) input.value = nextValue;
 }
 
 function openProfileEditor() {
@@ -1196,12 +1206,20 @@ onBeforeUnmount(clearMatchAnimationTimers);
         </div>
         <small>AI PERSON MATCHING</small>
         <h1>开始一轮个人匹配</h1>
-        <p>根据你的个人说明、能力方向和联系意愿，寻找值得请教或适合一起做事的人。</p>
-        <div class="matching-basis" aria-label="匹配依据">
-          <span><i aria-hidden="true"></i>个人说明</span>
-          <span><i aria-hidden="true"></i>能力方向</span>
-          <span><i aria-hidden="true"></i>联系意愿</span>
-        </div>
+        <p>写下这轮最想匹配到的人或合作方向。</p>
+        <label class="matching-requirement-field">
+          <span>匹配需求</span>
+          <div>
+            <input
+              :value="matchRequirement"
+              type="text"
+              maxlength="20"
+              placeholder="例如：寻找前端项目搭档"
+              @input="updateMatchRequirement"
+            />
+            <small>{{ matchRequirement.length }}/20</small>
+          </div>
+        </label>
         <button type="button" :disabled="matchRemainingCount === 0" @click="startMatchRound">
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3 1.5 4.1L18 9l-4.5 1.9L12 15l-1.5-4.1L6 9l4.5-1.9z"></path></svg>
           {{ matchRemainingCount === 0 ? '今日次数已用完' : '开始匹配' }}
