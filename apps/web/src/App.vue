@@ -15,34 +15,7 @@ type MatchRole = 'teacher' | 'student';
 type MatchStage = 'idle' | 'matching' | 'results';
 type ProfilePanel = 'overview' | 'published' | 'applications' | 'settings';
 
-const MATCH_DAILY_LIMIT = 3;
 
-function getLocalDayKey() {
-  const now = new Date();
-  const month = String(now.getMonth() + 1).padStart(2, '0');
-  const day = String(now.getDate()).padStart(2, '0');
-  return `${now.getFullYear()}-${month}-${day}`;
-}
-
-function loadDailyMatchCount() {
-  try {
-    const stored = JSON.parse(localStorage.getItem('campus-match-daily-usage-v3') || '{}') as {
-      date?: string;
-      count?: number;
-    };
-    return stored.date === getLocalDayKey() ? Math.min(stored.count || 0, MATCH_DAILY_LIMIT) : 0;
-  } catch {
-    return 0;
-  }
-}
-
-function loadMatchingEnabled() {
-  try {
-    return localStorage.getItem('campus-matching-enabled-v1') !== 'false';
-  } catch {
-    return true;
-  }
-}
 
 interface Opportunity {
   id: string;
@@ -103,99 +76,7 @@ const editSendProfile = ref(false);
 const contactDraft = ref('');
 const matchRequestMessage = ref('');
 
-const matchPeople: MatchPerson[] = [
-  {
-    id: 'teacher-zhang',
-    name: '张老师',
-    avatar: '张',
-    role: 'teacher',
-    roleLabel: '副教授',
-    college: '人工智能学院',
-    focus: '大模型应用与人机协作',
-    introduction: '关注大模型在教育与校园服务中的落地，指导过多项学生创新项目。',
-    tags: ['大模型应用', '科研入门', '项目指导'],
-    availability: '每周可交流 2 小时',
-    score: 92,
-  },
-  {
-    id: 'teacher-wu',
-    name: '吴老师',
-    avatar: '吴',
-    role: 'teacher',
-    roleLabel: '讲师',
-    college: '计算机学院',
-    focus: '前端工程与智能交互',
-    introduction: '研究智能交互与软件工程，愿意为校内技术实践提供方法建议。',
-    tags: ['智能交互', '软件工程', '技术实践'],
-    availability: '每周可交流 1–2 小时',
-    score: 87,
-  },
-  {
-    id: 'teacher-li',
-    name: '李老师',
-    avatar: '李',
-    role: 'teacher',
-    roleLabel: '副教授',
-    college: '创新创业学院',
-    focus: '创新项目孵化与成果转化',
-    introduction: '长期指导学生创新创业项目，关注真实需求验证与跨学院团队协作。',
-    tags: ['项目孵化', '需求验证', '团队指导'],
-    availability: '每两周可交流 1 次',
-    score: 85,
-  },
-  {
-    id: 'student-lin',
-    name: '林同学',
-    avatar: '林',
-    role: 'student',
-    roleLabel: '2027 届本科生',
-    college: '设计学院',
-    focus: '产品设计与用户研究',
-    introduction: '正在寻找校园产品共创伙伴，擅长原型设计、访谈和移动端体验。',
-    tags: ['产品设计', 'Figma', '用户调研'],
-    availability: '每周可投入 6–8 小时',
-    score: 90,
-  },
-  {
-    id: 'student-chen',
-    name: '陈同学',
-    avatar: '陈',
-    role: 'student',
-    roleLabel: '2026 届研究生',
-    college: '管理学院',
-    focus: '创新创业与商业分析',
-    introduction: '有挑战杯和创业项目经验，希望认识技术伙伴共同验证校园需求。',
-    tags: ['商业分析', '挑战杯', '创业实践'],
-    availability: '每周可投入 4–6 小时',
-    score: 84,
-  },
-  {
-    id: 'student-sun',
-    name: '孙同学',
-    avatar: '孙',
-    role: 'student',
-    roleLabel: '2027 届本科生',
-    college: '软件学院',
-    focus: 'Vue 3 与小程序开发',
-    introduction: '参与过两个校内服务小程序，希望寻找重视用户体验的长期项目。',
-    tags: ['Vue 3', '小程序', 'TypeScript'],
-    availability: '每周可投入 8 小时',
-    score: 88,
-  },
-  {
-    id: 'student-huang',
-    name: '黄同学',
-    avatar: '黄',
-    role: 'student',
-    roleLabel: '2026 届研究生',
-    college: '人工智能学院',
-    focus: '智能体应用与模型评测',
-    introduction: '正在研究校园场景中的智能体应用，希望认识产品和前端方向的合作伙伴。',
-    tags: ['AI Agent', '模型评测', 'Python'],
-    availability: '每周可投入 5–7 小时',
-    score: 86,
-  },
-];
+
 
 const fallback: Opportunity[] = [
   {
@@ -236,16 +117,25 @@ const initialMobileSection: MobileSection = window.location.hash === '#publish'
     ? 'profile'
     : 'opportunities';
 const activeMobileSection = ref<MobileSection>(initialMobileSection);
-const isMatchingEnabled = ref(loadMatchingEnabled());
+const isMatchingEnabled = ref(false);
 const matchStage = ref<MatchStage>('idle');
-const matchDailyCount = ref(loadDailyMatchCount());
+const matchRemainingCount = ref(3);
+const matchDay = ref('');
+const matchingBusy = ref(false);
+const matchingMessage = ref('');
+const matchRoundId = ref('');
+let matchingGeneration = 0;
+let matchingClock: ReturnType<typeof setInterval> | undefined;
+interface MatchResponse { day: string; enabled?: boolean; used: number; remaining: number; message?: string; round: { id: string; requestId: string; requirement: string; people: MatchPerson[]; algorithm: string } | null; }
 const matchRequirement = ref('');
 const matchAnimationMessage = ref('正在分析你的匹配需求');
 const roundMatchPeople = ref<MatchPerson[]>([]);
 const activeMatchCardIndex = ref(0);
 const matchingPersonList = ref<HTMLElement | null>(null);
 const selectedMatchPerson = ref<MatchPerson | null>(null);
-const requestedMatchIds = ref<Set<string>>(new Set());
+const requestedMatchIds = computed(() => new Set([...sentApplications.value, ...receivedApplications.value]
+  .filter(item => item.kind === 'MATCH')
+  .map(item => item.applicantId === signedInUser.value?.id ? item.targetUserId! : item.applicantId)));
 const isMatchSheetOpen = ref(false);
 const matchRequestSubmitted = ref(false);
 const matchIntent = ref('');
@@ -277,6 +167,9 @@ const accountMessage = ref('');
 const profileSaving = ref(false);
 
 function resetMatchingResults() {
+  matchingGeneration++;
+  matchRoundId.value = '';
+  matchingMessage.value = '';
   clearMatchAnimationTimers();
   matchStage.value = 'idle';
   roundMatchPeople.value = [];
@@ -299,7 +192,7 @@ async function refreshCurrentUser() {
   isMatchingEnabled.value = user.profile?.matchingEnabled ?? true;
   resetMatchingResults();
   contactDraft.value = user.contact;
-  await Promise.all([loadMyPublications(), loadApplications()]);
+  await Promise.all([loadMyPublications(), loadApplications(), loadMatchingStatus()]);
 }
 
 async function initializeAccount() {
@@ -332,14 +225,16 @@ function clearAccountView() {
   applicationViewRole.value = 'applicant';
   selectedApplicationStatus.value = 'all';
   contactDraft.value = '';
+  matchRequirement.value = '';
+  matchRemainingCount.value = 3;
+  matchDay.value = '';
   isApplicationSheetOpen.value = false;
   isProfileApplicationEditorOpen.value = false;
   selectedProfileApplicationId.value = null;
-  requestedMatchIds.value = new Set();
 }
 
 async function selectAccount(id: string) {
-  if (accountBusy.value || publicationBusy.value || applicationBusy.value) return;
+  if (accountBusy.value || publicationBusy.value || applicationBusy.value || matchingBusy.value) return;
   accountBusy.value = true;
   accountMessage.value = '';
   try {
@@ -353,7 +248,7 @@ async function selectAccount(id: string) {
 }
 
 async function signOut() {
-  if (accountBusy.value || publicationBusy.value || applicationBusy.value) return;
+  if (accountBusy.value || publicationBusy.value || applicationBusy.value || matchingBusy.value) return;
   accountBusy.value = true;
   try {
     await logout();
@@ -422,9 +317,7 @@ const filteredApplicationRecords = computed(() => {
 
 const filteredMatchPeople = computed(() => roundMatchPeople.value);
 
-const matchRemainingCount = computed(() =>
-  Math.max(0, MATCH_DAILY_LIMIT - matchDailyCount.value),
-);
+
 
 const filteredPublisherApplicationRecords = computed(() => {
   if (selectedApplicationStatus.value === 'all') return publisherApplicationRecords.value;
@@ -508,15 +401,35 @@ async function saveContact() {
   });
 }
 
-function takeRoundMatches(role: MatchRole, count: number, round: number) {
-  const candidates = matchPeople.filter((person) => person.role === role);
-  const resultCount = Math.min(count, candidates.length);
-  const startIndex = (round - 1) % candidates.length;
+function serverDay() { return new Date(Date.now() + 8 * 3600000).toISOString().slice(0, 10); }
 
-  return Array.from(
-    { length: resultCount },
-    (_, index) => candidates[(startIndex + index) % candidates.length]!,
-  );
+function acceptMatchResponse(result: MatchResponse) {
+  matchDay.value = result.day;
+  matchRemainingCount.value = result.remaining;
+  if (result.enabled !== undefined) isMatchingEnabled.value = result.enabled;
+  matchRoundId.value = result.round?.id ?? '';
+  roundMatchPeople.value = result.round?.people ?? [];
+  if (result.round) matchRequirement.value = result.round.requirement;
+  matchStage.value = result.round ? 'results' : 'idle';
+  activeMatchCardIndex.value = 0;
+  if (signedInUser.value && result.round) {
+    const key = `campus-match-pending:${signedInUser.value.id}`;
+    try {
+      const pending = JSON.parse(sessionStorage.getItem(key) || 'null');
+      if (pending?.requestId === result.round.requestId) sessionStorage.removeItem(key);
+    } catch { /* A failed browser storage read does not invalidate the server result. */ }
+  }
+}
+
+async function loadMatchingStatus() {
+  if (!signedInUser.value || matchingBusy.value) return;
+  const userId = signedInUser.value.id;
+  const generation = ++matchingGeneration;
+  try {
+    const result = await apiRequest<MatchResponse>('/matching/status');
+    if (signedInUser.value?.id !== userId || generation !== matchingGeneration) return;
+    acceptMatchResponse(result);
+  } catch (error) { if (generation === matchingGeneration) matchingMessage.value = (error as Error).message; }
 }
 
 function clearMatchAnimationTimers() {
@@ -547,46 +460,48 @@ function goToMatchCard(index: number) {
   list.scrollTo({ left: card.offsetLeft, behavior: 'smooth' });
 }
 
-function startMatchRound() {
-  if (!isMatchingEnabled.value || matchRemainingCount.value === 0) return;
-
-  clearMatchAnimationTimers();
-  const nextRound = matchDailyCount.value + 1;
-  const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-  const stepDuration = reduceMotion ? 40 : 430;
-
+async function startMatchRound() {
+  if (matchingBusy.value || accountBusy.value || !signedInUser.value) return;
+  matchingBusy.value = true;
+  matchingMessage.value = '';
+  const userId = signedInUser.value.id;
+  const generation = ++matchingGeneration;
+  const key = `campus-match-pending:${userId}`;
+  const requirement = matchRequirement.value;
+  let pending: { day: string; requirement: string; requestId: string };
+  try { pending = JSON.parse(sessionStorage.getItem(key) || 'null'); } catch { pending = null as never; }
+  if (!pending || pending.day !== serverDay() || pending.requirement !== requirement) {
+    pending = { day: serverDay(), requirement, requestId: crypto.randomUUID() };
+  }
+  sessionStorage.setItem(key, JSON.stringify(pending));
   matchStage.value = 'matching';
-  matchAnimationMessage.value = matchRequirement.value.trim()
-    ? `正在分析“${matchRequirement.value.trim()}”`
-    : '正在分析你的匹配需求';
-  activeMatchCardIndex.value = 0;
-  window.scrollTo(0, 0);
-
-  matchAnimationTimers.push(
-    setTimeout(() => {
-      matchAnimationMessage.value = '正在寻找符合需求的老师和同学';
-    }, stepDuration),
-    setTimeout(() => {
-      matchAnimationMessage.value = '正在确认双方匹配条件';
-    }, stepDuration * 2),
-    setTimeout(() => {
-      roundMatchPeople.value = [
-        ...takeRoundMatches('teacher', 2, nextRound),
-        ...takeRoundMatches('student', 3, nextRound),
-      ];
-      matchDailyCount.value = nextRound;
-      localStorage.setItem('campus-match-daily-usage-v3', JSON.stringify({
-        date: getLocalDayKey(),
-        count: matchDailyCount.value,
-      }));
-      matchStage.value = 'results';
-      matchAnimationTimers = [];
-    }, stepDuration * 3),
-  );
+  matchAnimationMessage.value = requirement ? `正在寻找“${requirement}”相关师生` : '正在根据个人说明寻找师生';
+  try {
+    const [result] = await Promise.all([
+      apiRequest<MatchResponse>('/matching/rounds', { method: 'POST', body: JSON.stringify({ requirement, requestId: pending.requestId }) }),
+      new Promise(resolve => setTimeout(resolve, window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 0 : 500)),
+    ]);
+    sessionStorage.removeItem(key);
+    if (generation !== matchingGeneration || signedInUser.value?.id !== userId) return;
+    acceptMatchResponse(result);
+    matchingMessage.value = result.message || '';
+    await loadApplications();
+  } catch (error) {
+    if (generation === matchingGeneration) {
+      matchStage.value = roundMatchPeople.value.length ? 'results' : 'idle';
+      matchingMessage.value = (error as Error).message;
+      matchingBusy.value = false;
+      const message = matchingMessage.value;
+      await loadMatchingStatus();
+      matchingMessage.value = message;
+    }
+  } finally {
+    matchingBusy.value = false;
+  }
 }
 
 function openMatchRequest(person: MatchPerson) {
-  if (requestedMatchIds.value.has(person.id)) return;
+  if (requestedMatchIds.value.has(person.id) || applicationBusy.value || matchingBusy.value) return;
   selectedMatchPerson.value = person;
   matchIntent.value = '';
   shouldSendMatchProfile.value = true;
@@ -599,13 +514,24 @@ function closeMatchRequest() {
   isMatchSheetOpen.value = false;
 }
 
-function submitMatchRequest() {
-  matchRequestMessage.value = '个人匹配请求尚未接入后端，本次未发送。机会申请已可正常使用。';
+async function submitMatchRequest() {
+  const person = selectedMatchPerson.value;
+  if (!person || applicationBusy.value || !signedInUser.value) return;
+  matchRequestMessage.value = '';
+  await applicationOperation(async () => {
+    await apiRequest('/matching/requests', { method: 'POST', body: JSON.stringify({
+      targetUserId: person.id, roundId: matchRoundId.value, note: matchIntent.value, sendProfile: shouldSendMatchProfile.value,
+    }) });
+    matchRequestSubmitted.value = true;
+    await loadApplications();
+  });
+  if (applicationMessage.value) matchRequestMessage.value = applicationMessage.value;
 }
 
 function selectMobileSection(section: MobileSection) {
   activeMobileSection.value = section;
   if (section === 'applications') void loadApplications();
+  if (section === 'matching') void loadMatchingStatus();
   if (section === 'profile') profilePanel.value = 'overview';
   window.history.replaceState(null, '', `#${section}`);
   window.scrollTo(0, 0);
@@ -620,39 +546,26 @@ function selectProfilePanel(panel: ProfilePanel) {
 
 function openMatchingSettings() {
   selectMobileSection('profile');
-  profilePanel.value = 'settings';
+  if (signedInUser.value) profilePanel.value = 'settings';
 }
 
 async function toggleMatchingEnabled() {
-  if (accountBusy.value) return;
-  const next = !isMatchingEnabled.value;
-  if (developmentAccounts.value.length && !signedInUser.value) {
-    accountMessage.value = '请先在我的页面选择账号登录';
-    return;
-  }
-  if (signedInUser.value) {
-    accountBusy.value = true;
-    try { await apiRequest('/me/profile', { method: 'PATCH', body: JSON.stringify({ matchingEnabled: next }) }); }
-    catch (error) { accountMessage.value = (error as Error).message; return; }
-    finally { accountBusy.value = false; }
-  } else {
-    localStorage.setItem('campus-matching-enabled-v1', String(next));
-  }
-  isMatchingEnabled.value = next;
-
-  if (!isMatchingEnabled.value) {
-    clearMatchAnimationTimers();
-    matchStage.value = 'idle';
-    roundMatchPeople.value = [];
-    activeMatchCardIndex.value = 0;
-    selectedMatchPerson.value = null;
-    isMatchSheetOpen.value = false;
-  }
+  if (accountBusy.value || matchingBusy.value || applicationBusy.value) return;
+  if (!signedInUser.value) { accountMessage.value = '请先登录'; return; }
+  accountBusy.value = true;
+  try {
+    const next = !isMatchingEnabled.value;
+    await apiRequest('/me/profile', { method: 'PATCH', body: JSON.stringify({ matchingEnabled: next }) });
+    isMatchingEnabled.value = next;
+    resetMatchingResults();
+    await loadMatchingStatus();
+  } catch (error) { accountMessage.value = (error as Error).message; }
+  finally { accountBusy.value = false; }
 }
 
 function updateMatchRequirement(event: Event) {
   const input = event.target as HTMLInputElement;
-  const nextValue = input.value.slice(0, 20);
+  const nextValue = [...input.value].slice(0, 20).join('');
   matchRequirement.value = nextValue;
   if (input.value !== nextValue) input.value = nextValue;
 }
@@ -936,7 +849,16 @@ async function loadOpportunities() {
 
 onMounted(loadOpportunities);
 onMounted(initializeAccount);
-onBeforeUnmount(clearMatchAnimationTimers);
+function refreshMatchingOnFocus() {
+  if (activeMobileSection.value === 'matching') void loadMatchingStatus();
+}
+onMounted(() => {
+  window.addEventListener('focus', refreshMatchingOnFocus);
+  matchingClock = setInterval(() => {
+    if (signedInUser.value && matchDay.value !== serverDay()) void loadMatchingStatus();
+  }, 60_000);
+});
+onBeforeUnmount(() => { clearMatchAnimationTimers(); clearInterval(matchingClock); window.removeEventListener('focus', refreshMatchingOnFocus); matchingGeneration++; });
 </script>
 
 <template>
@@ -1295,13 +1217,14 @@ onBeforeUnmount(clearMatchAnimationTimers);
       </section>
     </main>
 
-    <main v-else-if="activeMobileSection === 'matching'" class="matching-page" aria-label="AI 个人匹配">
+    <main v-else-if="activeMobileSection === 'matching'" class="matching-page" aria-label="个人匹配">
+      <p v-if="matchingMessage" class="application-feedback" role="status">{{ matchingMessage }}</p>
       <section v-if="!isMatchingEnabled" class="matching-state-page matching-start-card matching-disabled-card">
         <div class="matching-disabled-visual" aria-hidden="true">
           <svg viewBox="0 0 24 24"><path d="M8 11V8a4 4 0 0 1 7.5-2M7 11h10a2 2 0 0 1 2 2v6H5v-6a2 2 0 0 1 2-2Z"></path><path d="m4 4 16 16"></path></svg>
         </div>
         <small>MATCHING PAUSED</small>
-        <h1>匹配功能已关闭</h1>
+        <h1>{{ signedInUser ? '匹配功能已关闭' : '登录后开始匹配' }}</h1>
         <p>你的个人卡片不会出现在其他人的匹配结果中，当前也无法开始新的匹配。</p>
         <button type="button" @click="openMatchingSettings">前往设置</button>
       </section>
@@ -1317,7 +1240,7 @@ onBeforeUnmount(clearMatchAnimationTimers);
           <i class="matching-start-person person-two">生</i>
           <i class="matching-start-person person-three">生</i>
         </div>
-        <small>AI PERSON MATCHING</small>
+        <small>PERSON MATCHING · 规则匹配</small>
         <h1>开始一轮个人匹配</h1>
         <p>写下这轮最想匹配到的人或合作方向。</p>
         <label class="matching-requirement-field">
@@ -1330,10 +1253,10 @@ onBeforeUnmount(clearMatchAnimationTimers);
               placeholder="例如：寻找前端项目搭档"
               @input="updateMatchRequirement"
             />
-            <small>{{ matchRequirement.length }}/20</small>
+            <small>{{ [...matchRequirement].length }}/20</small>
           </div>
         </label>
-        <button type="button" :disabled="matchRemainingCount === 0" @click="startMatchRound">
+        <button type="button" :disabled="matchingBusy || accountBusy || !signedInUser || (matchRemainingCount === 0 && matchDay === serverDay())" @click="startMatchRound">
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3 1.5 4.1L18 9l-4.5 1.9L12 15l-1.5-4.1L6 9l4.5-1.9z"></path></svg>
           {{ matchRemainingCount === 0 ? '今日次数已用完' : '开始匹配' }}
         </button>
@@ -1361,6 +1284,7 @@ onBeforeUnmount(clearMatchAnimationTimers);
       </section>
 
       <section v-else class="matching-state-page matching-results-stage matching-results-enter">
+        <p v-if="filteredMatchPeople.length === 0" class="application-feedback">本轮师生已暂停匹配，请再来一轮。</p>
         <section
           ref="matchingPersonList"
           class="matching-person-list"
@@ -1377,7 +1301,7 @@ onBeforeUnmount(clearMatchAnimationTimers);
                 </span>
                 <small>{{ person.college }} · {{ person.roleLabel }}</small>
               </span>
-              <span class="matching-score"><strong>{{ person.score }}%</strong><small>匹配度</small></span>
+              <span class="matching-score"><strong>{{ person.score }}</strong><small>相关分</small></span>
             </header>
 
             <div class="matching-person-body">
@@ -1398,10 +1322,10 @@ onBeforeUnmount(clearMatchAnimationTimers);
             </div>
 
             <footer>
-              <small>{{ requestedMatchIds.has(person.id) ? '等待对方回应' : '同意后即可联系' }}</small>
+              <small>{{ requestedMatchIds.has(person.id) ? '进度请到申请页查看' : '同意后即可联系' }}</small>
               <button
                 type="button"
-                :disabled="requestedMatchIds.has(person.id)"
+                :disabled="applicationBusy || matchingBusy || requestedMatchIds.has(person.id)"
                 @click="openMatchRequest(person)"
               >{{ requestedMatchIds.has(person.id) ? '已发出' : '表明来意' }}</button>
             </footer>
@@ -1425,7 +1349,7 @@ onBeforeUnmount(clearMatchAnimationTimers);
         <button
           class="matching-rematch-button"
           type="button"
-          :disabled="matchRemainingCount === 0"
+          :disabled="matchingBusy || accountBusy || !signedInUser || (matchRemainingCount === 0 && matchDay === serverDay())"
           @click="startMatchRound"
         >{{ matchRemainingCount === 0 ? '今日次数已用完' : '再来一轮' }}</button>
       </section>
@@ -1455,7 +1379,7 @@ onBeforeUnmount(clearMatchAnimationTimers);
                 <strong>{{ selectedMatchPerson.name }}</strong>
                 <small>{{ selectedMatchPerson.college }} · {{ selectedMatchPerson.roleLabel }}</small>
               </span>
-              <em>{{ selectedMatchPerson.score }}% 匹配</em>
+              <em>{{ selectedMatchPerson.score }} 相关分</em>
             </div>
 
             <form class="application-form" @submit.prevent="submitMatchRequest">
@@ -1480,11 +1404,11 @@ onBeforeUnmount(clearMatchAnimationTimers);
 
               <div class="application-dingtalk-note">
                 <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 5 6v5c0 4.8 2.8 8.2 7 10 4.2-1.8 7-5.2 7-10V6z"></path><path d="m9 12 2 2 4-5"></path></svg>
-                <span>对方同意后，你们才可以通过钉钉联系</span>
+                <span>对方同意后，双方可查看已设置的联系方式</span>
               </div>
 
               <p v-if="matchRequestMessage" role="status">{{ matchRequestMessage }}</p>
-              <button class="application-submit-button" type="submit" :disabled="!matchIntent.trim()">
+              <button class="application-submit-button" type="submit" :disabled="applicationBusy || !matchIntent.trim()">
                 发送匹配请求
               </button>
             </form>
@@ -1613,10 +1537,10 @@ onBeforeUnmount(clearMatchAnimationTimers);
           <p v-if="developmentAccounts.length">本地开发账号</p>
           <div class="account-session-actions">
             <button v-for="account in developmentAccounts" :key="account.id" type="button"
-              :disabled="accountBusy || profileSaving || publicationBusy || applicationBusy || account.id === signedInUser?.id" @click="selectAccount(account.id)">
+              :disabled="accountBusy || profileSaving || publicationBusy || applicationBusy || matchingBusy || account.id === signedInUser?.id" @click="selectAccount(account.id)">
               {{ account.displayName }} · {{ account.role === 'TEACHER' ? '老师' : '学生' }}
             </button>
-            <button v-if="signedInUser" type="button" :disabled="accountBusy || profileSaving || publicationBusy || applicationBusy" @click="signOut">退出登录</button>
+            <button v-if="signedInUser" type="button" :disabled="accountBusy || profileSaving || publicationBusy || applicationBusy || matchingBusy" @click="signOut">退出登录</button>
           </div>
           <p v-if="accountMessage" role="status">{{ accountMessage }}</p>
         </section>
@@ -1906,7 +1830,7 @@ onBeforeUnmount(clearMatchAnimationTimers);
             <em v-if="item.hasProfile">附个人说明</em>
           </div>
 
-          <p class="publisher-application-target">{{ item.kind === 'match' ? '来意' : '申请' }}：{{ item.opportunity }}</p>
+          <p v-if="item.kind !== 'match'" class="publisher-application-target">申请：{{ item.opportunity }}</p>
 
           <div class="publisher-application-tags">
             <span v-for="tag in item.tags" :key="tag">{{ tag }}</span>
@@ -1957,7 +1881,7 @@ onBeforeUnmount(clearMatchAnimationTimers);
         </template>
         <template v-else-if="contactResult"><h3>{{ contactResult.displayName }}</h3><p class="private-contact">{{ contactResult.contact }}</p><p>{{ contactResult.message }}</p></template>
         <template v-else-if="applicationDetail">
-          <h3>{{ applicationDetail.opportunity.title }}</h3>
+          <h3>{{ applicationCard(applicationDetail, applicationDetail.targetUserId === signedInUser?.id).title }}</h3>
           <h4>申请说明</h4><p>{{ applicationDetail.note || '未填写申请说明' }}</p>
           <template v-if="applicationDetail.profileSnapshot">
             <h4>提交时的个人说明</h4><strong>{{ applicationDetail.profileSnapshot.headline }}</strong><p>{{ applicationDetail.profileSnapshot.introduction }}</p><p>{{ applicationDetail.profileSnapshot.tags.join(' · ') }}</p><p>{{ applicationDetail.profileSnapshot.availability }}</p>

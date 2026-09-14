@@ -15,6 +15,7 @@ import {
 } from '@prisma/client';
 
 const prisma = new PrismaClient();
+import { seedMatchingProfiles } from './seed-matching';
 
 const opportunities = [
   {
@@ -132,6 +133,7 @@ async function main() {
       },
     });
   }
+  await seedMatchingProfiles(prisma);
 }
 
 main()
