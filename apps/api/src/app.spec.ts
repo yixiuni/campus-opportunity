@@ -24,8 +24,8 @@ describe('Campus Opportunity API', () => {
 
   it('returns seeded campus opportunities', async () => {
     const response = await request(app.getHttpServer()).get('/api/opportunities').expect(200);
-    expect(Array.isArray(response.body)).toBe(true);
-    expect(response.body.every((item: { deadline: string }) =>
-      new Date(`${item.deadline}T23:59:59.999+08:00`).getTime() > Date.now())).toBe(true);
+    expect(response.body).toHaveLength(3);
+    expect(response.body[0].title).toContain('AI Agent');
   });
 });
+

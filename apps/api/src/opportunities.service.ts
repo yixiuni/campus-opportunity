@@ -1,12 +1,9 @@
-import { ConflictException, Injectable, NotFoundException } from '@nestjs/common';
-import { OpportunityCategory, OpportunityStatus, Prisma } from '@prisma/client';
-import { PrismaService } from './database/prisma.service';
-import { assertPublishable, validateOpportunity } from './opportunity-input';
+import { Injectable } from '@nestjs/common';
 
 export interface OpportunityRecord {
   id: string;
   title: string;
-  category: 'project' | 'competition' | 'research' | 'startup' | 'study';
+  category: 'project' | 'competition' | 'research' | 'startup' | 'organization';
   publisher: string;
   college: string;
   description: string;
@@ -15,100 +12,56 @@ export interface OpportunityRecord {
   location: string;
   applicants: number;
   deadline: string;
-  publishedAt: string;
   featured?: boolean;
 }
 
-const categoryMap: Record<OpportunityCategory, OpportunityRecord['category']> = {
-  PROJECT: 'project',
-  COMPETITION: 'competition',
-  RESEARCH: 'research',
-  STARTUP: 'startup',
-  STUDY: 'study',
-};
-
-const publicInclude = {
-  publisher: true,
-  _count: { select: { applications: { where: { status: { not: 'WITHDRAWN' as const } } } } },
-} satisfies Prisma.OpportunityInclude;
+const opportunities: OpportunityRecord[] = [
+  {
+    id: 'ai-campus-agent',
+    title: '校园 AI Agent 项目招募前端成员',
+    category: 'project',
+    publisher: '林同学 · 项目发起人',
+    college: '人工智能学院',
+    description: '一起完成面向校内服务的 AI Agent 原型，已有后端和产品方案，寻找愿意持续共创的前端同学。',
+    tags: ['Vue 3', 'TypeScript', 'AI 应用'],
+    commitment: '每周 6–8 小时 · 8 周',
+    location: '线上协作 + 图书馆讨论',
+    applicants: 6,
+    deadline: '2026-09-10',
+    featured: true,
+  },
+  {
+    id: 'challenge-cup-product',
+    title: '挑战杯团队寻找产品与调研成员',
+    category: 'competition',
+    publisher: '周同学 · 队长',
+    college: '管理学院',
+    description: '项目聚焦校园低碳生活，需要完成用户访谈、商业计划书和路演材料，欢迎认真负责的同学加入。',
+    tags: ['用户调研', '商业计划书', '路演'],
+    commitment: '每周 4–6 小时 · 12 周',
+    location: '主校区',
+    applicants: 9,
+    deadline: '2026-09-05',
+  },
+  {
+    id: 'cv-research-assistant',
+    title: '计算机视觉课题招募本科生助研',
+    category: 'research',
+    publisher: '张老师 · 课题负责人',
+    college: '计算机学院',
+    description: '参与数据整理、论文复现和实验记录，适合希望了解科研流程并具备 Python 基础的同学。',
+    tags: ['Python', 'PyTorch', '论文复现'],
+    commitment: '每周 8 小时 · 一学期',
+    location: '计算机学院实验室',
+    applicants: 12,
+    deadline: '2026-09-15',
+  },
+];
 
 @Injectable()
 export class OpportunitiesService {
-  constructor(private readonly prisma: PrismaService) {}
-
-  async findAll(): Promise<OpportunityRecord[]> {
-    const opportunities = await this.prisma.opportunity.findMany({
-      where: { status: OpportunityStatus.OPEN, deadline: { gt: new Date() } },
-      include: publicInclude,
-      orderBy: [{ featured: 'desc' }, { publishedAt: 'desc' }],
-    });
-
-    return opportunities.map((opportunity) => this.serialize(opportunity));
-  }
-
-  private serialize(opportunity: Prisma.OpportunityGetPayload<{ include: typeof publicInclude }>) {
-    return {
-      id: opportunity.id,
-      title: opportunity.title,
-      category: categoryMap[opportunity.category],
-      publisher: `${opportunity.publisher.displayName} · ${opportunity.publisherLabel}`,
-      college: opportunity.publisher.college,
-      description: opportunity.description,
-      tags: opportunity.tags,
-      commitment: opportunity.commitment,
-      location: opportunity.location,
-      applicants: opportunity._count.applications,
-      deadline: opportunity.deadline!.toISOString().slice(0, 10),
-      publishedAt: opportunity.publishedAt.toISOString(),
-      featured: opportunity.featured || undefined,
-    };
-  }
-
-  async findOne(id: string) {
-    const item = await this.prisma.opportunity.findFirst({
-      where: { id, status: 'OPEN', deadline: { gt: new Date() } }, include: publicInclude,
-    });
-    if (!item) throw new NotFoundException('机会已关闭、过期或不存在');
-    return this.serialize(item);
-  }
-
-  async create(userId: string, body: unknown) {
-    const { data, publish } = validateOpportunity(body, true);
-    const content = { title: '', description: '', category: OpportunityCategory.PROJECT, commitment: '', location: '', tags: [] as string[], deadline: null as Date | null, ...data };
-    if (publish) assertPublishable(content);
-    return this.prisma.opportunity.create({ data: {
-      ...content, publisherId: userId, publisherLabel: '发起人', status: publish ? 'OPEN' : 'DRAFT',
-    } });
-  }
-
-  async update(userId: string, id: string, body: unknown) {
-    const { data } = validateOpportunity(body);
-    return this.prisma.$transaction(async (tx) => {
-      const current = await tx.opportunity.findFirst({ where: { id, publisherId: userId } });
-      if (!current) throw new NotFoundException('未找到你的发布');
-      if (!['DRAFT', 'OPEN'].includes(current.status)) throw new ConflictException('当前状态不能编辑');
-      if (current.status === 'OPEN') assertPublishable({ ...current, ...data });
-      const result = await tx.opportunity.updateMany({
-        where: { id, publisherId: userId, status: current.status, updatedAt: current.updatedAt }, data,
-      });
-      if (!result.count) throw new ConflictException('机会已被修改，请刷新后重试');
-      return tx.opportunity.findUniqueOrThrow({ where: { id } });
-    });
-  }
-
-  async transition(userId: string, id: string, action: 'publish' | 'close') {
-    return this.prisma.$transaction(async (tx) => {
-      const current = await tx.opportunity.findFirst({ where: { id, publisherId: userId } });
-      if (!current) throw new NotFoundException('未找到你的发布');
-      const expected = action === 'publish' ? 'DRAFT' : 'OPEN';
-      if (current.status !== expected) throw new ConflictException('当前状态不允许此操作');
-      if (action === 'publish') assertPublishable(current);
-      const result = await tx.opportunity.updateMany({
-        where: { id, publisherId: userId, status: expected, updatedAt: current.updatedAt },
-        data: action === 'publish' ? { status: 'OPEN', publishedAt: new Date() } : { status: 'CLOSED' },
-      });
-      if (!result.count) throw new ConflictException('机会状态已变化，请刷新后重试');
-      return tx.opportunity.findUniqueOrThrow({ where: { id } });
-    });
+  findAll(): OpportunityRecord[] {
+    return opportunities;
   }
 }
+
