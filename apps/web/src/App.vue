@@ -164,6 +164,7 @@ const developmentAccounts = ref<Account[]>([]);
 const signedInUser = ref<CurrentUser | null>(null);
 const accountBusy = ref(false);
 const accountMessage = ref('');
+const isAccountSheetOpen = ref(false);
 const profileSaving = ref(false);
 
 function resetMatchingResults() {
@@ -275,6 +276,7 @@ const profileSaveMessage = ref('');
 const profilePanel = ref<ProfilePanel>('overview');
 const profilePublications = ref<Publication[]>([]);
 const editingPublication = ref<Publication | null>(null);
+const isProfilePublicationEditorOpen = ref(false);
 const publicationBusy = ref(false);
 const publicationMessage = ref('');
 const confirmCloseId = ref<string | null>(null);
@@ -292,6 +294,7 @@ async function loadMyPublications() {
 }
 
 function resetPublishForm() {
+  isProfilePublicationEditorOpen.value = false;
   editingPublication.value = null;
   publishForm.value = { category: 'project', title: '', description: '', weeklyTime: '', duration: '', location: '', deadline: '', tags: '' };
   publishFormMessage.value = '';
@@ -349,6 +352,7 @@ async function loadApplications() {
     if (signedInUser.value?.id !== userId) return;
     sentApplications.value = sent;
     receivedApplications.value = received;
+    applicationMessage.value = '';
     return true;
   } catch (error) {
     if (signedInUser.value?.id === userId) applicationMessage.value = (error as Error).message;
@@ -547,6 +551,7 @@ function selectProfilePanel(panel: ProfilePanel) {
 function openMatchingSettings() {
   selectMobileSection('profile');
   if (signedInUser.value) profilePanel.value = 'settings';
+  else isAccountSheetOpen.value = true;
 }
 
 async function toggleMatchingEnabled() {
@@ -637,7 +642,16 @@ function openProfilePublicationEditor(id: string) {
     tags: item.tags.join('、'),
   };
   publishFormMessage.value = '';
-  selectMobileSection('publish');
+  isProfilePublicationEditorOpen.value = true;
+}
+
+function closeProfilePublicationEditor() {
+  if (publicationBusy.value) return;
+  resetPublishForm();
+}
+
+async function saveProfilePublication() {
+  if (await persistPublication(editingPublication.value?.status === 'OPEN')) closeProfilePublicationEditor();
 }
 
 function openProfileApplicationEditor(id: string) {
@@ -646,6 +660,7 @@ function openProfileApplicationEditor(id: string) {
   selectedProfileApplicationId.value = id;
   profileApplicationDraft.value = item.note;
   editSendProfile.value = item.raw.sendProfile;
+  applicationDetail.value = null;
   applicationMessage.value = '';
   isProfileApplicationEditorOpen.value = true;
 }
@@ -700,6 +715,7 @@ async function persistPublication(publish: boolean) {
     publishFormMessage.value = saved.status === 'DRAFT' ? '草稿已保存，可在“我的发布”继续编辑' : '已保存并发布，首页已同步更新';
     const refreshed = await Promise.all([loadMyPublications(), loadOpportunities()]);
     if (refreshed.includes(false)) publishFormMessage.value = '保存成功，但列表刷新失败，请稍后重试';
+    return !refreshed.includes(false);
   } catch (error) { publishFormMessage.value = (error as Error).message; }
   finally { publicationBusy.value = false; }
 }
@@ -1013,7 +1029,7 @@ onBeforeUnmount(() => { clearMatchAnimationTimers(); clearInterval(matchingClock
 
             <div class="application-dingtalk-note">
               <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 5 6v5c0 4.8 2.8 8.2 7 10 4.2-1.8 7-5.2 7-10V6z"></path><path d="m9 12 2 2 4-5"></path></svg>
-              <span>申请通过后，双方可查看已设置的联系方式</span>
+              <span>申请通过后发起人可与你联系</span>
             </div>
 
             <p v-if="applicationMessage" role="status">{{ applicationMessage }}</p>
@@ -1028,7 +1044,7 @@ onBeforeUnmount(() => { clearMatchAnimationTimers(); clearInterval(matchingClock
             <svg viewBox="0 0 24 24"><path d="m6 12 4 4 8-9"></path></svg>
           </div>
           <h2 id="application-sheet-title">申请已提交</h2>
-          <p>可在“申请－我发出的”查看进度；通过后双方可查看已设置的联系方式。</p>
+          <p>申请通过后发起人可与你联系</p>
           <button type="button" @click="closeApplicationSheet">完成</button>
         </div>
       </section>
@@ -1433,13 +1449,12 @@ onBeforeUnmount(() => { clearMatchAnimationTimers(); clearInterval(matchingClock
           <h1>{{ editingPublication ? '编辑校园机会' : '发布校园机会' }}</h1>
           <p>把需要的人、要做的事和投入要求说清楚。</p>
         </div>
-        <button type="button" aria-label="更多发布设置">
+        <button type="button" :disabled="publicationBusy" :aria-label="editingPublication ? '发布新机会' : '更多发布设置'" @click="editingPublication && resetPublishForm()">
           <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="5" cy="12" r="1.4"></circle><circle cx="12" cy="12" r="1.4"></circle><circle cx="19" cy="12" r="1.4"></circle></svg>
         </button>
       </header>
 
       <p v-if="!signedInUser" class="publish-form-message">请先到“我的”登录，再保存或发布机会。</p>
-      <button v-if="editingPublication" type="button" :disabled="publicationBusy" @click="resetPublishForm">发布新机会</button>
       <form class="publish-form" @submit.prevent="submitPublishForm">
         <section class="publish-form-card">
           <div class="publish-field-heading">
@@ -1525,24 +1540,11 @@ onBeforeUnmount(() => { clearMatchAnimationTimers(); clearInterval(matchingClock
             <h2>{{ currentUserIdentity.name }}</h2>
             <p>{{ currentUserIdentity.college }} · {{ currentUserIdentity.roleLabel }}</p>
           </div>
-          <button type="button" aria-label="编辑基本资料">›</button>
+          <button type="button" aria-label="编辑基本资料" @click="isAccountSheetOpen = true">›</button>
           <div class="profile-level-bar" aria-label="校园成长等级">
             <span><small>校园成长等级</small><strong>Lv.3 共创者</strong></span>
             <div><i><b></b></i><small>68%</small></div>
           </div>
-        </section>
-
-        <section v-if="developmentAccounts.length || signedInUser" class="account-session-panel" aria-label="账号登录">
-          <strong>{{ signedInUser ? `当前账号：${signedInUser.displayName}` : '选择账号登录' }}</strong>
-          <p v-if="developmentAccounts.length">本地开发账号</p>
-          <div class="account-session-actions">
-            <button v-for="account in developmentAccounts" :key="account.id" type="button"
-              :disabled="accountBusy || profileSaving || publicationBusy || applicationBusy || matchingBusy || account.id === signedInUser?.id" @click="selectAccount(account.id)">
-              {{ account.displayName }} · {{ account.role === 'TEACHER' ? '老师' : '学生' }}
-            </button>
-            <button v-if="signedInUser" type="button" :disabled="accountBusy || profileSaving || publicationBusy || applicationBusy || matchingBusy" @click="signOut">退出登录</button>
-          </div>
-          <p v-if="accountMessage" role="status">{{ accountMessage }}</p>
         </section>
 
         <section class="profile-data-strip" aria-label="我的校园数据">
@@ -1606,14 +1608,10 @@ onBeforeUnmount(() => { clearMatchAnimationTimers(); clearInterval(matchingClock
             <p>{{ item.description }}</p>
             <div><span>{{ item.deadline ? `${item.deadline.slice(0, 10)} 截止` : '截止日期待填写' }}</span><span>{{ item.applicants }} 人申请</span></div>
             <footer>
-              <button v-if="['DRAFT', 'OPEN'].includes(item.status)" type="button" :disabled="publicationBusy" @click="openProfilePublicationEditor(item.id)">{{ item.status === 'DRAFT' ? '继续编辑' : '编辑发布' }}</button>
-              <button v-if="item.status === 'OPEN'" type="button" :disabled="publicationBusy" @click="confirmCloseId = item.id">关闭招募</button>
+              <small>{{ item.status === 'DRAFT' ? '完善后即可发布' : item.status === 'OPEN' ? '修改后会更新展示内容' : '历史记录已保留' }}</small>
+              <button v-if="['DRAFT', 'OPEN'].includes(item.status)" type="button" :disabled="publicationBusy" @click="openProfilePublicationEditor(item.id)">编辑发布</button>
+              <span v-else>仅查看</span>
             </footer>
-            <div v-if="confirmCloseId === item.id" role="group" aria-label="确认关闭招募">
-              <span>关闭后停止招募，保留历史记录。</span>
-              <button type="button" :disabled="publicationBusy" @click="closePublication(item.id)">确认关闭</button>
-              <button type="button" :disabled="publicationBusy" @click="confirmCloseId = null">取消</button>
-            </div>
           </article>
         </section>
       </template>
@@ -1630,7 +1628,7 @@ onBeforeUnmount(() => { clearMatchAnimationTimers(); clearInterval(matchingClock
               <em :class="`status-${item.status}`">{{ item.statusText }}</em>
             </header>
             <h2>{{ item.title }}</h2>
-            <p>{{ item.note }}</p>
+            <p>{{ item.note || item.update }}</p>
             <div><span>{{ item.college }}</span><span>{{ item.submittedAt }}</span></div>
             <footer>
               <small>{{ item.status === 'pending' ? '对方处理前可修改申请说明' : '该申请已被处理，不能再修改' }}</small>
@@ -1662,12 +1660,6 @@ onBeforeUnmount(() => { clearMatchAnimationTimers(); clearInterval(matchingClock
           ><i aria-hidden="true"></i></button>
         </section>
         <p class="profile-preference-note">关闭后，你不会被其他人匹配到，同时匹配页面也将暂停使用。</p>
-        <form class="contact-settings" @submit.prevent="saveContact">
-          <label class="publish-field"><span>联系方式（选填）</span><input v-model="contactDraft" maxlength="120" placeholder="钉钉号或其他你愿意提供的联系方式" /></label>
-          <p>仅申请通过后向对方展示，不显示在个人卡片中。清空后停止展示；已被对方保存的信息无法收回。</p>
-          <button type="submit" :disabled="applicationBusy || !signedInUser">保存联系方式</button>
-          <p v-if="applicationMessage" role="status">{{ applicationMessage }}</p>
-        </form>
         <p v-if="accountMessage" role="status">{{ accountMessage }}</p>
       </template>
 
@@ -1739,7 +1731,7 @@ onBeforeUnmount(() => { clearMatchAnimationTimers(); clearInterval(matchingClock
     </main>
 
     <main v-else class="applications-page" aria-label="申请与匹配">
-      <div class="application-feedback"><span v-if="applicationMessage" role="status">{{ applicationMessage }}</span><span v-if="!signedInUser">登录后可查看真实申请</span><button type="button" :disabled="applicationBusy || !signedInUser" @click="loadApplications">刷新申请</button></div>
+      <div v-if="applicationMessage" class="application-feedback" role="status">{{ applicationMessage }}<button type="button" :disabled="applicationBusy || !signedInUser" @click="loadApplications">重试</button></div>
       <section class="application-role-switch" aria-label="申请身份切换">
         <button
           type="button"
@@ -1794,13 +1786,11 @@ onBeforeUnmount(() => { clearMatchAnimationTimers(); clearInterval(matchingClock
           </div>
 
           <footer>
-            <button type="button" :disabled="applicationBusy" @click="viewApplication(item.id)">查看申请</button>
-            <button v-if="item.status === 'pending'" type="button" :disabled="applicationBusy" @click="openProfileApplicationEditor(item.id)">修改</button>
-            <button v-if="item.status === 'pending' || item.status === 'approved'" type="button" :disabled="applicationBusy" @click="applicationAction = { id: item.id, action: 'withdraw' }">撤回</button>
+            <button type="button" :disabled="applicationBusy" @click="viewApplication(item.id)">{{ item.kind === 'match' ? '查看来意' : '查看申请' }}</button>
             <button v-if="item.status === 'approved'" class="application-contact-button" type="button" :disabled="applicationBusy" @click="viewApplicationContact(item.id)">
               {{ item.kind === 'match' ? '联系对方' : '联系发起人' }}
             </button>
-            <span v-else-if="item.status === 'pending'">可刷新查看处理进度</span>
+            <span v-else-if="item.status === 'pending'">等待对方处理</span>
             <span v-else>请求记录已归档</span>
           </footer>
         </article>
@@ -1830,7 +1820,7 @@ onBeforeUnmount(() => { clearMatchAnimationTimers(); clearInterval(matchingClock
             <em v-if="item.hasProfile">附个人说明</em>
           </div>
 
-          <p v-if="item.kind !== 'match'" class="publisher-application-target">申请：{{ item.opportunity }}</p>
+          <p class="publisher-application-target">{{ item.kind === 'match' ? '来意' : '申请' }}：{{ item.opportunity }}</p>
 
           <div class="publisher-application-tags">
             <span v-for="tag in item.tags" :key="tag">{{ tag }}</span>
@@ -1856,6 +1846,66 @@ onBeforeUnmount(() => { clearMatchAnimationTimers(); clearInterval(matchingClock
       </section>
     </main>
 
+    <div v-if="isAccountSheetOpen" class="application-sheet-backdrop" @click.self="!accountBusy && !applicationBusy && (isAccountSheetOpen = false)">
+      <section class="application-sheet profile-editor-sheet" role="dialog" aria-modal="true" aria-labelledby="account-sheet-title">
+        <div class="application-sheet-handle" aria-hidden="true"></div>
+        <header class="application-sheet-header">
+          <div><h2 id="account-sheet-title">账号与联系方式</h2></div>
+          <button type="button" aria-label="关闭账号设置" :disabled="accountBusy || applicationBusy" @click="isAccountSheetOpen = false"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"></path></svg></button>
+        </header>
+        <section class="account-session-panel" aria-label="账号登录">
+          <strong>{{ signedInUser ? `当前账号：${signedInUser.displayName}` : '选择账号登录' }}</strong>
+          <p v-if="developmentAccounts.length">本地开发账号</p>
+          <p v-else-if="!signedInUser">登录服务暂未开放</p>
+          <div class="account-session-actions">
+            <button v-for="account in developmentAccounts" :key="account.id" type="button"
+              :disabled="accountBusy || profileSaving || publicationBusy || applicationBusy || matchingBusy || account.id === signedInUser?.id" @click="selectAccount(account.id)">
+              {{ account.displayName }} · {{ account.role === 'TEACHER' ? '老师' : '学生' }}
+            </button>
+            <button v-if="signedInUser" type="button" :disabled="accountBusy || profileSaving || publicationBusy || applicationBusy || matchingBusy" @click="signOut">退出登录</button>
+          </div>
+          <p v-if="accountMessage" role="status">{{ accountMessage }}</p>
+        </section>
+        <form v-if="signedInUser" class="profile-editor-form" @submit.prevent="saveContact">
+          <label class="publish-field"><span>联系方式（选填）</span><input v-model="contactDraft" maxlength="120" placeholder="钉钉号或其他你愿意提供的联系方式" /></label>
+          <p class="profile-preference-note">仅申请通过后向对方展示，不显示在个人卡片中。清空后停止展示；已被对方保存的信息无法收回。</p>
+          <button class="application-submit-button" type="submit" :disabled="applicationBusy || accountBusy">保存联系方式</button>
+          <p v-if="applicationMessage" role="status">{{ applicationMessage }}</p>
+        </form>
+      </section>
+    </div>
+
+    <div v-if="isProfilePublicationEditorOpen && editingPublication" class="application-sheet-backdrop" @click.self="closeProfilePublicationEditor">
+      <section class="application-sheet profile-editor-sheet" role="dialog" aria-modal="true" aria-labelledby="publication-editor-title">
+        <div class="application-sheet-handle" aria-hidden="true"></div>
+        <header class="application-sheet-header">
+          <div><h2 id="publication-editor-title">编辑发布</h2><p>修改后会同步更新这条校园机会</p></div>
+          <button type="button" aria-label="关闭发布编辑" :disabled="publicationBusy" @click="closeProfilePublicationEditor"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"></path></svg></button>
+        </header>
+        <form class="profile-editor-form" @submit.prevent="saveProfilePublication">
+          <label class="publish-field"><span>机会标题 <small>必填</small></span><input v-model="publishForm.title" maxlength="60" /></label>
+          <label class="publish-field"><span>机会介绍 <small>必填</small></span><textarea v-model="publishForm.description" maxlength="300"></textarea><i>{{ publishForm.description.length }}/300</i></label>
+          <label class="publish-field"><span>申请截止日期 <small>必填</small></span><input v-model="publishForm.deadline" type="date" /></label>
+          <details class="editor-more">
+            <summary>更多发布设置</summary>
+            <label class="publish-field"><span>机会类型</span><select v-model="publishForm.category"><option v-for="key in (['project', 'competition', 'research', 'startup', 'study'] as const)" :key="key" :value="key">{{ categoryLabels[key] }}</option></select></label>
+            <label class="publish-field"><span>每周投入</span><input v-model="publishForm.weeklyTime" /></label>
+            <label class="publish-field"><span>持续时间</span><input v-model="publishForm.duration" /></label>
+            <label class="publish-field"><span>地点</span><input v-model="publishForm.location" /></label>
+            <label class="publish-field"><span>能力标签</span><input v-model="publishForm.tags" /></label>
+            <div v-if="editingPublication.status === 'OPEN'" class="application-detail-actions"><button type="button" :disabled="publicationBusy" @click="confirmCloseId = editingPublication.id">关闭招募</button></div>
+            <div v-if="confirmCloseId" role="group" aria-label="确认关闭招募">
+              <p>关闭后停止招募，保留历史记录。</p>
+              <div class="application-detail-actions"><button type="button" :disabled="publicationBusy" @click="closePublication(confirmCloseId)">确认关闭</button><button type="button" :disabled="publicationBusy" @click="confirmCloseId = null">取消</button></div>
+            </div>
+            <button v-if="editingPublication.status === 'DRAFT'" class="application-submit-button" type="button" :disabled="publicationBusy" @click="submitPublishForm">确认发布</button>
+          </details>
+          <p v-if="publishFormMessage" class="publish-form-message" role="status">{{ publishFormMessage }}</p>
+          <button class="application-submit-button" type="submit" :disabled="publicationBusy">{{ publicationBusy ? '正在保存…' : '保存修改' }}</button>
+        </form>
+      </section>
+    </div>
+
       <div v-if="isProfileApplicationEditorOpen" class="application-sheet-backdrop" @click.self="closeProfileApplicationEditor">
         <section class="application-sheet profile-editor-sheet" role="dialog" aria-modal="true" aria-labelledby="profile-application-editor-title">
           <div class="application-sheet-handle" aria-hidden="true"></div>
@@ -1865,7 +1915,7 @@ onBeforeUnmount(() => { clearMatchAnimationTimers(); clearInterval(matchingClock
           </header>
           <form class="profile-editor-form" @submit.prevent="saveProfileApplication">
             <label class="publish-field"><span>申请说明 <small>选填</small></span><textarea v-model="profileApplicationDraft" maxlength="180" placeholder="补充你希望参与的原因和相关经历"></textarea><i>{{ profileApplicationDraft.length }}/180</i></label>
-            <label class="application-profile-toggle"><span>发送个人说明（重新保存当前快照）</span><input v-model="editSendProfile" type="checkbox" /></label>
+            <label class="application-profile-toggle"><span><strong>发送个人说明</strong><small>附上“我的”中已保存的个人说明</small></span><input v-model="editSendProfile" type="checkbox" /><i aria-hidden="true"></i></label>
             <p v-if="applicationMessage" role="status">{{ applicationMessage }}</p>
             <button class="application-submit-button" type="submit" :disabled="applicationBusy">保存修改</button>
           </form>
@@ -1886,6 +1936,10 @@ onBeforeUnmount(() => { clearMatchAnimationTimers(); clearInterval(matchingClock
           <template v-if="applicationDetail.profileSnapshot">
             <h4>提交时的个人说明</h4><strong>{{ applicationDetail.profileSnapshot.headline }}</strong><p>{{ applicationDetail.profileSnapshot.introduction }}</p><p>{{ applicationDetail.profileSnapshot.tags.join(' · ') }}</p><p>{{ applicationDetail.profileSnapshot.availability }}</p>
           </template><p v-else>未附个人说明</p>
+          <div v-if="applicationDetail.applicantId === signedInUser?.id" class="application-detail-actions">
+            <button v-if="applicationDetail.status === 'PENDING'" type="button" :disabled="applicationBusy" @click="openProfileApplicationEditor(applicationDetail.id)">修改申请</button>
+            <button v-if="['PENDING', 'APPROVED'].includes(applicationDetail.status)" type="button" :disabled="applicationBusy" @click="applicationAction = { id: applicationDetail.id, action: 'withdraw' }">撤回申请</button>
+          </div>
         </template>
       </section>
     </div>

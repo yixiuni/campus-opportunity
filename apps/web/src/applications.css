@@ -4,8 +4,9 @@
 .application-info-sheet p { white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.7; }
 .application-info-sheet h4 { margin: 20px 0 8px; }
 .private-contact { font-weight: 600; user-select: text; }
-.contact-settings { margin-top: 16px; padding: 16px; background: white; border-radius: 12px; }
-.contact-settings p { font-size: 12px; line-height: 1.6; color: #626366; }
-.contact-settings button { border: 0; border-radius: 8px; padding: 12px 16px; background: #2f63c7; color: white; }
-.application-record-card footer { flex-wrap: wrap; gap: 8px; }
+.application-detail-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 16px; }
+.application-detail-actions button { min-height: 32px; padding: 0 10px; border: 1px solid #dfe4e1; border-radius: 7px; background: #fff; color: #626366; font: inherit; font-size: 12px; }
+.editor-more summary { color: var(--brand-action); cursor: pointer; font-size: 13px; }
+.editor-more[open] { display: grid; gap: 12px; }
+.editor-more .publish-field { margin-top: 12px; }
 button:disabled { cursor: not-allowed; }

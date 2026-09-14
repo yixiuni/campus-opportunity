@@ -38,6 +38,9 @@ jobs:
       - name: Build web app
         run: pnpm --filter @campus/web build
 
+      - name: Check approved UI structure
+        run: pnpm --filter @campus/web test
+
       - name: Configure GitHub Pages
         uses: actions/configure-pages@v5
 
