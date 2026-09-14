@@ -198,14 +198,25 @@ async function refreshCurrentUser() {
 
 async function initializeAccount() {
   if (import.meta.env.DEV) {
-    developmentAccounts.value = await apiRequest<Account[]>('/auth/dev/accounts').catch(() => []);
+    try { developmentAccounts.value = await apiRequest<Account[]>('/auth/dev/accounts'); }
+    catch { accountMessage.value = '本地登录服务暂时无法连接，请稍后重新打开登录。'; }
   }
   if (hasSession()) {
     try { await refreshCurrentUser(); }
     catch (error) { clearAccountView(); accountMessage.value = (error as Error).message; }
-  } else if (developmentAccounts.value.length) {
+  } else {
     clearAccountView();
   }
+}
+
+async function openAccountSheet() {
+  isAccountSheetOpen.value = true;
+  if (!isDevelopment || accountBusy.value) return;
+  accountBusy.value = true;
+  accountMessage.value = '';
+  try { developmentAccounts.value = await apiRequest<Account[]>('/auth/dev/accounts'); }
+  catch { accountMessage.value = '本地登录服务暂时无法连接，请稍后重新打开登录。'; }
+  finally { accountBusy.value = false; }
 }
 
 function clearAccountView() {
@@ -244,6 +255,7 @@ async function selectAccount(id: string) {
     await login(id);
     await refreshCurrentUser();
     accountMessage.value = '已登录，个人说明和匹配设置将同步保存';
+    isAccountSheetOpen.value = false;
   } catch (error) { accountMessage.value = (error as Error).message; }
   finally { accountBusy.value = false; }
 }
@@ -549,9 +561,9 @@ function selectProfilePanel(panel: ProfilePanel) {
 }
 
 function openMatchingSettings() {
+  if (!signedInUser.value) { void openAccountSheet(); return; }
   selectMobileSection('profile');
-  if (signedInUser.value) profilePanel.value = 'settings';
-  else isAccountSheetOpen.value = true;
+  profilePanel.value = 'settings';
 }
 
 async function toggleMatchingEnabled() {
@@ -844,6 +856,7 @@ const filteredOpportunities = computed(() => {
 });
 
 async function loadOpportunities() {
+  if (!apiOnline.value) loading.value = true;
   try {
     const [healthResponse, opportunitiesResponse] = await Promise.all([
       fetch('/api/health'),
@@ -1187,8 +1200,6 @@ onBeforeUnmount(() => { clearMatchAnimationTimers(); clearInterval(matchingClock
         <div v-if="loading" class="loading-state">正在连接校园机会服务…</div>
         <div v-else class="opportunity-grid">
           <p v-if="publicationMessage" role="status">{{ publicationMessage }}</p>
-          <p v-if="!filteredOpportunities.length">{{ apiOnline ? '暂时没有符合条件的招募机会' : '暂时无法加载机会' }}</p>
-          <button v-if="!apiOnline" type="button" @click="loadOpportunities">重新加载</button>
           <article
             v-for="item in filteredOpportunities"
             :key="item.id"
@@ -1227,8 +1238,9 @@ onBeforeUnmount(() => { clearMatchAnimationTimers(); clearInterval(matchingClock
         </div>
 
         <div v-if="!loading && filteredOpportunities.length === 0" class="empty-state">
-          <strong>没有找到相关机会</strong>
-          <span>换一个关键词或分类试试。</span>
+          <strong>{{ apiOnline ? '没有找到相关机会' : '暂时无法连接服务' }}</strong>
+          <span>{{ apiOnline ? '换一个关键词或分类试试。' : '请稍后再试。' }}</span>
+          <button v-if="!apiOnline" class="connection-retry" type="button" aria-label="重新连接服务" title="重新连接服务" @click="loadOpportunities"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 7v5h-5M4 17v-5h5M6.1 7a7 7 0 0 1 11.5-1L20 9M4 15l2.4 3A7 7 0 0 0 18 17"></path></svg></button>
         </div>
       </section>
     </main>
@@ -1239,10 +1251,10 @@ onBeforeUnmount(() => { clearMatchAnimationTimers(); clearInterval(matchingClock
         <div class="matching-disabled-visual" aria-hidden="true">
           <svg viewBox="0 0 24 24"><path d="M8 11V8a4 4 0 0 1 7.5-2M7 11h10a2 2 0 0 1 2 2v6H5v-6a2 2 0 0 1 2-2Z"></path><path d="m4 4 16 16"></path></svg>
         </div>
-        <small>MATCHING PAUSED</small>
+        <small>{{ signedInUser ? 'MATCHING PAUSED' : 'PERSON MATCHING' }}</small>
         <h1>{{ signedInUser ? '匹配功能已关闭' : '登录后开始匹配' }}</h1>
-        <p>你的个人卡片不会出现在其他人的匹配结果中，当前也无法开始新的匹配。</p>
-        <button type="button" @click="openMatchingSettings">前往设置</button>
+        <p>{{ signedInUser ? '你的个人卡片不会出现在其他人的匹配结果中，当前也无法开始新的匹配。' : '登录后即可填写需求，寻找合适的老师或同学。' }}</p>
+        <button type="button" @click="openMatchingSettings">{{ signedInUser ? '前往设置' : '去登录' }}</button>
       </section>
 
       <section v-else-if="matchStage === 'idle'" class="matching-state-page matching-start-card">
@@ -1540,7 +1552,7 @@ onBeforeUnmount(() => { clearMatchAnimationTimers(); clearInterval(matchingClock
             <h2>{{ currentUserIdentity.name }}</h2>
             <p>{{ currentUserIdentity.college }} · {{ currentUserIdentity.roleLabel }}</p>
           </div>
-          <button type="button" aria-label="编辑基本资料" @click="isAccountSheetOpen = true">›</button>
+          <button type="button" :aria-label="signedInUser ? '账号与联系方式' : '登录账号'" aria-haspopup="dialog" @click="openAccountSheet">{{ signedInUser ? '账号' : '登录' }}</button>
           <div class="profile-level-bar" aria-label="校园成长等级">
             <span><small>校园成长等级</small><strong>Lv.3 共创者</strong></span>
             <div><i><b></b></i><small>68%</small></div>
@@ -1855,8 +1867,9 @@ onBeforeUnmount(() => { clearMatchAnimationTimers(); clearInterval(matchingClock
         </header>
         <section class="account-session-panel" aria-label="账号登录">
           <strong>{{ signedInUser ? `当前账号：${signedInUser.displayName}` : '选择账号登录' }}</strong>
-          <p v-if="developmentAccounts.length">本地开发账号</p>
-          <p v-else-if="!signedInUser">登录服务暂未开放</p>
+          <p v-if="accountBusy">正在连接登录服务…</p>
+          <p v-else-if="developmentAccounts.length">本地开发账号</p>
+          <p v-else-if="!signedInUser && !accountMessage">{{ isDevelopment ? '暂无可用的开发账号' : '登录服务暂未开放' }}</p>
           <div class="account-session-actions">
             <button v-for="account in developmentAccounts" :key="account.id" type="button"
               :disabled="accountBusy || profileSaving || publicationBusy || applicationBusy || matchingBusy || account.id === signedInUser?.id" @click="selectAccount(account.id)">

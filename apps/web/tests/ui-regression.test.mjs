@@ -81,3 +81,18 @@ test('only attached snapshots supply tags; empty notes still have status text', 
   assert.equal(card.hasProfile, true);
   assert.ok(card.update);
 });
+
+test('login is labelled explicitly in both profile and matching views', () => {
+  const profile = find(ast, 'profile-identity-card').loc.source;
+  const matching = find(ast, 'matching-disabled-card').loc.source;
+  assert.match(profile, /signedInUser \? '账号' : '登录'/);
+  assert.match(profile, /@click="openAccountSheet"/);
+  assert.match(matching, /signedInUser \? '前往设置' : '去登录'/);
+  assert.match(source, /if \(!signedInUser\.value\) \{ void openAccountSheet\(\); return; \}/);
+});
+
+test('connection feedback is not inserted as an unstyled retry button in the card grid', () => {
+  const grid = find(ast, 'opportunity-grid').loc.source;
+  assert.doesNotMatch(grid, /重新加载|暂时无法加载机会|暂时没有符合条件的招募机会/);
+  assert.match(source, /class="connection-retry"[^>]+aria-label="重新连接服务"/);
+});

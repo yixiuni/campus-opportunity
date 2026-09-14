@@ -18,3 +18,31 @@
   font-size: 14px;
 }
 .account-session-actions button:disabled { opacity: .5; cursor: wait; }
+
+/* Keep the compact identity card, but make its account entry discoverable. */
+.profile-page .profile-identity-card { grid-template-columns: 58px minmax(0, 1fr) auto; }
+.profile-identity-card > button[aria-haspopup="dialog"] {
+  width: auto;
+  min-width: 48px;
+  height: 32px;
+  padding: 0 10px;
+  border-radius: 8px;
+  border: 1px solid var(--brand-line);
+  background: var(--brand-pale);
+  color: var(--brand);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 20px;
+}
+.connection-retry {
+  width: 36px;
+  height: 36px;
+  margin: 12px auto 0;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--brand-line);
+  border-radius: 50%;
+  color: var(--brand-action);
+  background: var(--brand-pale);
+}
+.connection-retry svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
