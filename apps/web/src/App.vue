@@ -1,5 +1,7 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue';
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref } from 'vue';
+import { apiRequest, hasSession, login, logout, type Account, type CurrentUser, type PersonalProfile } from './api/auth';
+import './auth.css';
 
 type Category = 'all' | 'project' | 'competition' | 'research' | 'startup' | 'study';
 type MobileSection = 'opportunities' | 'matching' | 'publish' | 'applications' | 'profile';
@@ -350,13 +352,88 @@ const publishForm = ref({
   tags: '',
 });
 const publishFormMessage = ref('');
-const currentUserIdentity = {
+const currentUserIdentity = reactive({
   name: '林同学',
   avatar: '林',
   role: 'student' as MatchRole,
   roleLabel: '2027 届本科生',
   college: '人工智能学院',
-};
+});
+const developmentAccounts = ref<Account[]>([]);
+const signedInUser = ref<CurrentUser | null>(null);
+const accountBusy = ref(false);
+const accountMessage = ref('');
+const profileSaving = ref(false);
+
+function resetMatchingResults() {
+  clearMatchAnimationTimers();
+  matchStage.value = 'idle';
+  roundMatchPeople.value = [];
+  activeMatchCardIndex.value = 0;
+  selectedMatchPerson.value = null;
+  isMatchSheetOpen.value = false;
+}
+
+async function refreshCurrentUser() {
+  const user = await apiRequest<CurrentUser>('/me');
+  signedInUser.value = user;
+  Object.assign(currentUserIdentity, {
+    name: user.displayName, avatar: user.avatar || user.displayName.slice(0, 1),
+    role: user.role === 'TEACHER' ? 'teacher' : 'student', roleLabel: user.roleLabel, college: user.college,
+  });
+  personalProfile.value = user.profile ? {
+    headline: user.profile.headline, introduction: user.profile.introduction,
+    tags: user.profile.tags, availability: user.profile.availability,
+  } : { headline: '', introduction: '', tags: [], availability: '' };
+  isMatchingEnabled.value = user.profile?.matchingEnabled ?? true;
+  resetMatchingResults();
+}
+
+async function initializeAccount() {
+  if (import.meta.env.DEV) {
+    developmentAccounts.value = await apiRequest<Account[]>('/auth/dev/accounts').catch(() => []);
+  }
+  if (hasSession()) {
+    try { await refreshCurrentUser(); }
+    catch (error) { clearAccountView(); accountMessage.value = (error as Error).message; }
+  } else if (developmentAccounts.value.length) {
+    clearAccountView();
+  }
+}
+
+function clearAccountView() {
+  signedInUser.value = null;
+  Object.assign(currentUserIdentity, { name: '未登录', avatar: '我', college: '校园机会', roleLabel: '请先登录' });
+  personalProfile.value = { headline: '', introduction: '', tags: [], availability: '' };
+  isMatchingEnabled.value = false;
+  resetMatchingResults();
+  isProfileEditorOpen.value = false;
+}
+
+async function selectAccount(id: string) {
+  if (accountBusy.value) return;
+  accountBusy.value = true;
+  accountMessage.value = '';
+  try {
+    if (hasSession()) await logout();
+    clearAccountView();
+    await login(id);
+    await refreshCurrentUser();
+    accountMessage.value = '已登录，个人说明和匹配设置将同步保存';
+  } catch (error) { accountMessage.value = (error as Error).message; }
+  finally { accountBusy.value = false; }
+}
+
+async function signOut() {
+  if (accountBusy.value) return;
+  accountBusy.value = true;
+  try {
+    await logout();
+    clearAccountView();
+    accountMessage.value = '已退出登录';
+  } catch (error) { accountMessage.value = (error as Error).message; }
+  finally { accountBusy.value = false; }
+}
 const personalProfile = ref({
   headline: '校园 AI 产品与前端实践者',
   introduction: '关注校园场景中的 AI 产品，正在学习 Vue 3、TypeScript 与用户调研，希望认识愿意长期共创的老师和同学。',
@@ -580,9 +657,22 @@ function openMatchingSettings() {
   profilePanel.value = 'settings';
 }
 
-function toggleMatchingEnabled() {
-  isMatchingEnabled.value = !isMatchingEnabled.value;
-  localStorage.setItem('campus-matching-enabled-v1', String(isMatchingEnabled.value));
+async function toggleMatchingEnabled() {
+  if (accountBusy.value) return;
+  const next = !isMatchingEnabled.value;
+  if (developmentAccounts.value.length && !signedInUser.value) {
+    accountMessage.value = '请先在我的页面选择账号登录';
+    return;
+  }
+  if (signedInUser.value) {
+    accountBusy.value = true;
+    try { await apiRequest('/me/profile', { method: 'PATCH', body: JSON.stringify({ matchingEnabled: next }) }); }
+    catch (error) { accountMessage.value = (error as Error).message; return; }
+    finally { accountBusy.value = false; }
+  } else {
+    localStorage.setItem('campus-matching-enabled-v1', String(next));
+  }
+  isMatchingEnabled.value = next;
 
   if (!isMatchingEnabled.value) {
     clearMatchAnimationTimers();
@@ -624,19 +714,31 @@ function closeProfileEditor() {
   isProfileEditorOpen.value = false;
 }
 
-function savePersonalProfile() {
+async function savePersonalProfile() {
+  if (profileSaving.value || accountBusy.value) return;
   const draft = profileDraft.value;
   if (!draft.headline.trim() || !draft.introduction.trim()) {
     profileSaveMessage.value = '请先填写个人方向和个人介绍';
     return;
   }
 
-  personalProfile.value = {
+  const nextProfile = {
     headline: draft.headline.trim(),
     introduction: draft.introduction.trim(),
     tags: splitProfileTags(draft.tags),
     availability: draft.availability.trim() || '投入时间待补充',
   };
+  if (developmentAccounts.value.length && !signedInUser.value) {
+    profileSaveMessage.value = '请先在我的页面选择账号登录';
+    return;
+  }
+  if (signedInUser.value) {
+    profileSaving.value = true;
+    try { await apiRequest<PersonalProfile>('/me/profile', { method: 'PATCH', body: JSON.stringify(nextProfile) }); }
+    catch (error) { profileSaveMessage.value = (error as Error).message; return; }
+    finally { profileSaving.value = false; }
+  }
+  personalProfile.value = nextProfile;
   profileSaveMessage.value = '个人说明已更新';
   window.setTimeout(() => {
     isProfileEditorOpen.value = false;
@@ -826,6 +928,7 @@ async function loadOpportunities() {
 }
 
 onMounted(loadOpportunities);
+onMounted(initializeAccount);
 onBeforeUnmount(clearMatchAnimationTimers);
 </script>
 
@@ -1492,6 +1595,19 @@ onBeforeUnmount(clearMatchAnimationTimers);
           </div>
         </section>
 
+        <section v-if="developmentAccounts.length || signedInUser" class="account-session-panel" aria-label="账号登录">
+          <strong>{{ signedInUser ? `当前账号：${signedInUser.displayName}` : '选择账号登录' }}</strong>
+          <p v-if="developmentAccounts.length">本地开发账号</p>
+          <div class="account-session-actions">
+            <button v-for="account in developmentAccounts" :key="account.id" type="button"
+              :disabled="accountBusy || profileSaving || account.id === signedInUser?.id" @click="selectAccount(account.id)">
+              {{ account.displayName }} · {{ account.role === 'TEACHER' ? '老师' : '学生' }}
+            </button>
+            <button v-if="signedInUser" type="button" :disabled="accountBusy || profileSaving" @click="signOut">退出登录</button>
+          </div>
+          <p v-if="accountMessage" role="status">{{ accountMessage }}</p>
+        </section>
+
         <section class="profile-data-strip" aria-label="我的校园数据">
           <button type="button" @click="selectProfilePanel('published')"><strong>{{ profilePublications.length }}</strong><span>我的发布</span></button>
           <i aria-hidden="true"></i>
@@ -1602,6 +1718,7 @@ onBeforeUnmount(clearMatchAnimationTimers);
           ><i aria-hidden="true"></i></button>
         </section>
         <p class="profile-preference-note">关闭后，你不会被其他人匹配到，同时匹配页面也将暂停使用。</p>
+        <p v-if="accountMessage" role="status">{{ accountMessage }}</p>
       </template>
 
       <div v-if="isProfileEditorOpen" class="application-sheet-backdrop" @click.self="closeProfileEditor">

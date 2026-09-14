@@ -1,0 +1,20 @@
+.account-session-panel {
+  margin: 12px 0;
+  padding: 16px;
+  border: 1px solid var(--brand-line, #ced9ef);
+  border-radius: 12px;
+  background: white;
+  color: var(--brand, #163479);
+}
+.account-session-panel p { margin: 8px 0; font-size: 13px; }
+.account-session-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+.account-session-actions button {
+  padding: 8px 12px;
+  border: 1px solid var(--brand-line, #ced9ef);
+  border-radius: 8px;
+  background: var(--brand-soft, #eaf0fb);
+  color: inherit;
+  font: inherit;
+  font-size: 14px;
+}
+.account-session-actions button:disabled { opacity: .5; cursor: wait; }
