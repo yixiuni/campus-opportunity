@@ -3,7 +3,7 @@ export type OpportunityCategory =
   | 'competition'
   | 'research'
   | 'startup'
-  | 'organization';
+  | 'study';
 
 export interface OpportunitySummary {
   id: string;
@@ -25,4 +25,3 @@ export interface HealthResponse {
   service: string;
   timestamp: string;
 }
-

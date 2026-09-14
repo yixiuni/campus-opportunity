@@ -6,7 +6,8 @@
 
 - Vue 3 + TypeScript 手机端优先响应式首页
 - NestJS 健康检查接口
-- 校园机会列表接口
+- 基于 Prisma + PostgreSQL 的校园机会列表接口
+- 可重复执行的数据库迁移与本地种子数据
 - PostgreSQL / Redis 本地容器配置
 - 钉钉凭证和身份适配预留
 
@@ -21,6 +22,10 @@
 ```bash
 cp .env.example .env
 pnpm install
+docker compose up -d postgres
+pnpm db:generate
+pnpm db:deploy
+pnpm db:seed
 pnpm dev
 ```
 
@@ -30,10 +35,13 @@ pnpm dev
 - API 健康检查：http://localhost:3000/api/health
 - 机会列表：http://localhost:3000/api/opportunities
 
-如需启动本地数据库：
+首次拉取项目或数据库结构变化后，需要依次执行：
 
 ```bash
-docker compose up -d
+docker compose up -d postgres # 启动 PostgreSQL
+pnpm db:generate              # 生成 Prisma 客户端
+pnpm db:deploy                # 应用已提交的数据库迁移
+pnpm db:seed                  # 写入本地演示数据，可重复执行
 ```
 
 ## 常用命令
@@ -43,6 +51,7 @@ pnpm dev        # 同时启动前后端
 pnpm build      # 生产构建
 pnpm typecheck  # 类型检查
 pnpm test       # 后端测试
+pnpm db:studio  # 打开 Prisma 数据管理界面
 ```
 
 ## 安全提醒

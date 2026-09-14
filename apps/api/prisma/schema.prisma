@@ -1,0 +1,86 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  STUDENT
+  TEACHER
+  ORGANIZATION
+  ADMIN
+}
+
+enum OpportunityCategory {
+  PROJECT
+  COMPETITION
+  RESEARCH
+  STARTUP
+  STUDY
+}
+
+enum OpportunityStatus {
+  DRAFT
+  PENDING_REVIEW
+  OPEN
+  CLOSED
+  REJECTED
+}
+
+model User {
+  id            String        @id @default(cuid())
+  displayName   String        @map("display_name")
+  avatar        String?
+  role          UserRole      @default(STUDENT)
+  roleLabel     String        @map("role_label")
+  college       String
+  createdAt     DateTime      @default(now()) @map("created_at")
+  updatedAt     DateTime      @updatedAt @map("updated_at")
+  profile       Profile?
+  opportunities Opportunity[]
+
+  @@map("users")
+}
+
+model Profile {
+  id              String   @id @default(cuid())
+  userId          String   @unique @map("user_id")
+  headline        String
+  introduction    String
+  tags            String[] @default([])
+  availability    String
+  matchingEnabled Boolean  @default(true) @map("matching_enabled")
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("profiles")
+}
+
+model Opportunity {
+  id             String              @id @default(cuid())
+  publisherId    String              @map("publisher_id")
+  publisherLabel String              @map("publisher_label")
+  title          String
+  category       OpportunityCategory
+  status         OpportunityStatus   @default(OPEN)
+  description    String
+  tags           String[]            @default([])
+  commitment     String
+  location       String
+  applicants     Int                 @default(0)
+  deadline       DateTime
+  featured       Boolean             @default(false)
+  publishedAt    DateTime            @default(now()) @map("published_at")
+  createdAt      DateTime            @default(now()) @map("created_at")
+  updatedAt      DateTime            @updatedAt @map("updated_at")
+  publisher      User                @relation(fields: [publisherId], references: [id], onDelete: Restrict)
+
+  @@index([status, category])
+  @@index([deadline])
+  @@index([publisherId])
+  @@map("opportunities")
+}

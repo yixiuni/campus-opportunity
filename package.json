@@ -10,6 +10,11 @@
     "dev": "pnpm --parallel --filter @campus/web --filter @campus/api dev",
     "dev:web": "pnpm --filter @campus/web dev",
     "dev:api": "pnpm --filter @campus/api dev",
+    "db:generate": "pnpm --filter @campus/api db:generate",
+    "db:migrate": "pnpm --filter @campus/api db:migrate",
+    "db:deploy": "pnpm --filter @campus/api db:deploy",
+    "db:seed": "pnpm --filter @campus/api db:seed",
+    "db:studio": "pnpm --filter @campus/api db:studio",
     "build": "pnpm --filter @campus/shared typecheck && pnpm --filter @campus/api build && pnpm --filter @campus/web build",
     "typecheck": "pnpm -r typecheck",
     "test": "pnpm --filter @campus/api test"
