@@ -2,6 +2,8 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref } from 'vue';
 import { apiRequest, hasSession, login, logout, type Account, type CurrentUser, type PersonalProfile } from './api/auth';
 import './auth.css';
+import { type Publication, publicationStatusLabels } from './api/opportunities';
+const isDevelopment = import.meta.env.DEV;
 
 type Category = 'all' | 'project' | 'competition' | 'research' | 'startup' | 'study';
 type MobileSection = 'opportunities' | 'matching' | 'publish' | 'applications' | 'profile';
@@ -53,6 +55,7 @@ interface Opportunity {
   applicants: number;
   deadline: string;
   featured?: boolean;
+  publishedAt?: string;
 }
 
 interface MatchPerson {
@@ -387,6 +390,7 @@ async function refreshCurrentUser() {
   } : { headline: '', introduction: '', tags: [], availability: '' };
   isMatchingEnabled.value = user.profile?.matchingEnabled ?? true;
   resetMatchingResults();
+  await loadMyPublications();
 }
 
 async function initializeAccount() {
@@ -408,10 +412,12 @@ function clearAccountView() {
   isMatchingEnabled.value = false;
   resetMatchingResults();
   isProfileEditorOpen.value = false;
+  profilePublications.value = [];
+  resetPublishForm();
 }
 
 async function selectAccount(id: string) {
-  if (accountBusy.value) return;
+  if (accountBusy.value || publicationBusy.value) return;
   accountBusy.value = true;
   accountMessage.value = '';
   try {
@@ -425,7 +431,7 @@ async function selectAccount(id: string) {
 }
 
 async function signOut() {
-  if (accountBusy.value) return;
+  if (accountBusy.value || publicationBusy.value) return;
   accountBusy.value = true;
   try {
     await logout();
@@ -450,29 +456,35 @@ const profileDraftTags = computed(() => splitProfileTags(profileDraft.value.tags
 const isProfileEditorOpen = ref(false);
 const profileSaveMessage = ref('');
 const profilePanel = ref<ProfilePanel>('overview');
-const profilePublications = ref([
-  {
-    id: 'profile-published-ai-agent',
-    title: '校园 AI Agent 项目招募前端成员',
-    category: '项目',
-    summary: '一起完成面向校内服务的 AI Agent 原型，寻找愿意持续共创的前端同学。',
-    applicants: 6,
-    deadline: '2026-09-10',
-    status: '招募中',
-  },
-  {
-    id: 'profile-draft-research',
-    title: '校园智能体用户调研伙伴',
-    category: '项目',
-    summary: '面向校内师生开展需求访谈与产品验证。',
-    applicants: 0,
-    deadline: '2026-09-20',
-    status: '草稿',
-  },
-]);
-const selectedProfilePublicationId = ref<string | null>(null);
-const profilePublicationDraft = ref({ title: '', summary: '', deadline: '' });
-const isProfilePublicationEditorOpen = ref(false);
+const profilePublications = ref<Publication[]>([]);
+const editingPublication = ref<Publication | null>(null);
+const publicationBusy = ref(false);
+const publicationMessage = ref('');
+const confirmCloseId = ref<string | null>(null);
+const weeklyOpportunityCount = computed(() => opportunities.value.filter((item) =>
+  item.publishedAt && Date.parse(item.publishedAt) >= Date.now() - 7 * 86400000).length);
+
+async function loadMyPublications() {
+  const userId = signedInUser.value?.id;
+  if (!userId) { profilePublications.value = []; return; }
+  try {
+    const records = await apiRequest<Publication[]>('/me/opportunities');
+    if (signedInUser.value?.id === userId) profilePublications.value = records;
+    return true;
+  } catch (error) { publicationMessage.value = (error as Error).message; return false; }
+}
+
+function resetPublishForm() {
+  editingPublication.value = null;
+  publishForm.value = { category: 'project', title: '', description: '', weeklyTime: '', duration: '', location: '', deadline: '', tags: '' };
+  publishFormMessage.value = '';
+  confirmCloseId.value = null;
+}
+
+function publicationStatus(item: Publication) {
+  if (item.status === 'OPEN' && item.deadline && Date.parse(item.deadline) <= Date.now()) return '已截止';
+  return publicationStatusLabels[item.status];
+}
 const selectedProfileApplicationId = ref<string | null>(null);
 const profileApplicationNotes = ref<Record<string, string>>({
   'application-ai-agent': '希望参与前端开发与交互设计，也愿意配合早期用户调研。',
@@ -649,6 +661,7 @@ function selectMobileSection(section: MobileSection) {
 
 function selectProfilePanel(panel: ProfilePanel) {
   profilePanel.value = panel;
+  if (panel === 'published') void loadMyPublications();
   window.scrollTo(0, 0);
 }
 
@@ -749,30 +762,16 @@ async function savePersonalProfile() {
 function openProfilePublicationEditor(id: string) {
   const item = profilePublications.value.find((publication) => publication.id === id);
   if (!item) return;
-  selectedProfilePublicationId.value = id;
-  profilePublicationDraft.value = {
-    title: item.title,
-    summary: item.summary,
-    deadline: item.deadline,
+  if (publicationBusy.value) return;
+  editingPublication.value = item;
+  const [weeklyTime = '', ...duration] = item.commitment.split(' · ');
+  publishForm.value = {
+    title: item.title, description: item.description, category: item.category.toLowerCase() as Exclude<Category, 'all'>,
+    deadline: item.deadline?.slice(0, 10) ?? '', weeklyTime, duration: duration.join(' · '), location: item.location,
+    tags: item.tags.join('、'),
   };
-  isProfilePublicationEditorOpen.value = true;
-}
-
-function closeProfilePublicationEditor() {
-  isProfilePublicationEditorOpen.value = false;
-  selectedProfilePublicationId.value = null;
-}
-
-function saveProfilePublication() {
-  const id = selectedProfilePublicationId.value;
-  const draft = profilePublicationDraft.value;
-  if (!id || !draft.title.trim() || !draft.summary.trim() || !draft.deadline) return;
-  profilePublications.value = profilePublications.value.map((item) =>
-    item.id === id
-      ? { ...item, title: draft.title.trim(), summary: draft.summary.trim(), deadline: draft.deadline }
-      : item,
-  );
-  closeProfilePublicationEditor();
+  publishFormMessage.value = '';
+  selectMobileSection('publish');
 }
 
 function openProfileApplicationEditor(id: string) {
@@ -798,18 +797,60 @@ function saveProfileApplication() {
   closeProfileApplicationEditor();
 }
 
-function savePublishDraft() {
-  publishFormMessage.value = '草稿已保存到本机';
-}
-
-function submitPublishForm() {
+async function persistPublication(publish: boolean) {
+  if (publicationBusy.value || accountBusy.value) return;
+  if (!signedInUser.value || !hasSession()) {
+    publishFormMessage.value = '请先到“我的”登录，再保存或发布机会';
+    return;
+  }
   const form = publishForm.value;
-  if (!form.title.trim() || !form.description.trim() || !form.deadline) {
+  if (publish && (!form.title.trim() || !form.description.trim() || !form.deadline)) {
     publishFormMessage.value = '请先填写标题、机会介绍和截止日期';
     return;
   }
 
-  publishFormMessage.value = '发布信息已填写完成，后续接入审核流程';
+  publicationBusy.value = true;
+  publishFormMessage.value = '';
+  try {
+    const body = {
+      title: form.title, description: form.description, category: form.category,
+      commitment: [form.weeklyTime.trim(), form.duration.trim()].filter(Boolean).join(' · '),
+      location: form.location, deadline: form.deadline || null,
+      tags: form.tags.split(/[、,，]/).map((tag) => tag.trim()).filter(Boolean),
+    };
+    let saved: Publication;
+    if (editingPublication.value) {
+      saved = await apiRequest<Publication>(`/opportunities/${editingPublication.value.id}`, { method: 'PATCH', body: JSON.stringify(body) });
+    } else {
+      saved = await apiRequest<Publication>('/opportunities', { method: 'POST', body: JSON.stringify({ ...body, intent: publish ? 'publish' : 'draft' }) });
+    }
+    editingPublication.value = saved;
+    if (publish && saved.status === 'DRAFT') {
+      saved = await apiRequest<Publication>(`/opportunities/${saved.id}/publish`, { method: 'POST' });
+      editingPublication.value = saved;
+    }
+    publishFormMessage.value = saved.status === 'DRAFT' ? '草稿已保存，可在“我的发布”继续编辑' : '已保存并发布，首页已同步更新';
+    const refreshed = await Promise.all([loadMyPublications(), loadOpportunities()]);
+    if (refreshed.includes(false)) publishFormMessage.value = '保存成功，但列表刷新失败，请稍后重试';
+  } catch (error) { publishFormMessage.value = (error as Error).message; }
+  finally { publicationBusy.value = false; }
+}
+
+function savePublishDraft() { return persistPublication(false); }
+function submitPublishForm() { return persistPublication(true); }
+
+async function closePublication(id: string) {
+  if (publicationBusy.value) return;
+  publicationBusy.value = true;
+  publicationMessage.value = '';
+  try {
+    await apiRequest(`/opportunities/${id}/close`, { method: 'POST' });
+    if (editingPublication.value?.id === id) resetPublishForm();
+    confirmCloseId.value = null;
+    publicationMessage.value = '已关闭招募，首页不再展示';
+    await Promise.all([loadMyPublications(), loadOpportunities()]);
+  } catch (error) { publicationMessage.value = (error as Error).message; }
+  finally { publicationBusy.value = false; }
 }
 
 const isSelectedOpportunitySaved = computed(() => {
@@ -877,6 +918,10 @@ const detailRequirements = computed(() => {
 });
 
 async function openOpportunity(item: Opportunity) {
+  if (apiOnline.value) {
+    try { item = await apiRequest<Opportunity>(`/opportunities/${item.id}`); }
+    catch (error) { publicationMessage.value = (error as Error).message; await loadOpportunities(); return; }
+  }
   listScrollPosition = window.scrollY;
   selectedOpportunity.value = item;
   await nextTick();
@@ -919,9 +964,11 @@ async function loadOpportunities() {
     if (!healthResponse.ok || !opportunitiesResponse.ok) throw new Error('API unavailable');
     opportunities.value = (await opportunitiesResponse.json()) as Opportunity[];
     apiOnline.value = true;
+    return true;
   } catch {
-    opportunities.value = fallback;
+    opportunities.value = import.meta.env.DEV ? [] : fallback;
     apiOnline.value = false;
+    return false;
   } finally {
     loading.value = false;
   }
@@ -1116,13 +1163,13 @@ onBeforeUnmount(clearMatchAnimationTimers);
       </a>
 
       <nav class="desktop-nav" aria-label="主导航">
-        <a class="active" href="#opportunities">找机会</a>
-        <a href="#publish">发机会</a>
-        <a href="#applications">我的申请</a>
+        <a :class="{ active: activeMobileSection === 'opportunities' }" href="#opportunities" @click.prevent="selectMobileSection('opportunities')">找机会</a>
+        <a :class="{ active: activeMobileSection === 'publish' }" href="#publish" @click.prevent="selectMobileSection('publish')">发机会</a>
+        <a :class="{ active: activeMobileSection === 'applications' }" href="#applications" @click.prevent="selectMobileSection('applications')">我的申请</a>
       </nav>
 
       <button class="profile-button" type="button" @click="selectMobileSection('profile')">
-        <span class="avatar">陈</span>
+        <span class="avatar">{{ signedInUser?.displayName.slice(0, 1) || '我' }}</span>
         <span>我的档案</span>
       </button>
     </header>
@@ -1156,7 +1203,7 @@ onBeforeUnmount(clearMatchAnimationTimers);
           <button class="mobile-search-submit" type="submit">搜索</button>
         </form>
 
-        <div class="mobile-highlight" aria-label="本周新增 18 个校园机会">
+        <div class="mobile-highlight" :aria-label="`本周新增 ${weeklyOpportunityCount} 个校园机会`">
           <div class="mobile-highlight-header">
             <span class="mobile-highlight-label">
               <strong>本周机会速览</strong>
@@ -1164,7 +1211,7 @@ onBeforeUnmount(clearMatchAnimationTimers);
             </span>
           </div>
           <p class="mobile-highlight-main">
-            <strong>18</strong>
+            <strong>{{ weeklyOpportunityCount }}</strong>
             <span>个校园机会正在招募</span>
           </p>
           <div class="mobile-highlight-coverage" aria-label="覆盖项目、竞赛、科研、创业和学业机会">
@@ -1196,7 +1243,7 @@ onBeforeUnmount(clearMatchAnimationTimers);
           <div class="hero-card-top">
             <span class="live-dot"></span>
             <span>本周精选机会</span>
-            <small>18 个新机会</small>
+            <small>{{ weeklyOpportunityCount }} 个新机会</small>
           </div>
           <article>
             <span class="category-badge">项目</span>
@@ -1222,7 +1269,7 @@ onBeforeUnmount(clearMatchAnimationTimers);
             <p class="mobile-section-note">根据你的技能与偏好推荐</p>
           </div>
           <div class="api-status" :class="{ offline: !apiOnline }">
-            <span></span>{{ apiOnline ? '后端服务已连接' : '正在展示本地预览数据' }}
+            <span></span>{{ apiOnline ? '后端服务已连接' : isDevelopment ? '连接失败，请重试' : '正在展示本地预览数据' }}
           </div>
         </div>
 
@@ -1239,8 +1286,10 @@ onBeforeUnmount(clearMatchAnimationTimers);
         </div>
 
         <div v-if="loading" class="loading-state">正在连接校园机会服务…</div>
-
         <div v-else class="opportunity-grid">
+          <p v-if="publicationMessage" role="status">{{ publicationMessage }}</p>
+          <p v-if="!filteredOpportunities.length">{{ apiOnline ? '暂时没有符合条件的招募机会' : '暂时无法加载机会' }}</p>
+          <button v-if="!apiOnline" type="button" @click="loadOpportunities">重新加载</button>
           <article
             v-for="item in filteredOpportunities"
             :key="item.id"
@@ -1495,7 +1544,7 @@ onBeforeUnmount(clearMatchAnimationTimers);
       <header class="publish-page-header">
         <div>
           <small>CREATE OPPORTUNITY</small>
-          <h1>发布校园机会</h1>
+          <h1>{{ editingPublication ? '编辑校园机会' : '发布校园机会' }}</h1>
           <p>把需要的人、要做的事和投入要求说清楚。</p>
         </div>
         <button type="button" aria-label="更多发布设置">
@@ -1503,6 +1552,8 @@ onBeforeUnmount(clearMatchAnimationTimers);
         </button>
       </header>
 
+      <p v-if="!signedInUser" class="publish-form-message">请先到“我的”登录，再保存或发布机会。</p>
+      <button v-if="editingPublication" type="button" :disabled="publicationBusy" @click="resetPublishForm">发布新机会</button>
       <form class="publish-form" @submit.prevent="submitPublishForm">
         <section class="publish-form-card">
           <div class="publish-field-heading">
@@ -1562,10 +1613,10 @@ onBeforeUnmount(clearMatchAnimationTimers);
             <input v-model="publishForm.tags" placeholder="用逗号分隔，如 Vue 3、调研、路演" />
           </label>
           <div class="publish-identity-note">
-            <span class="publish-avatar" aria-hidden="true">林</span>
+            <span class="publish-avatar" aria-hidden="true">{{ signedInUser ? currentUserIdentity.avatar : '我' }}</span>
             <span>
-              <strong>林同学 · 人工智能学院</strong>
-              <small>将使用校内钉钉认证身份发布</small>
+              <strong>{{ signedInUser ? `${currentUserIdentity.name} · ${currentUserIdentity.college}` : '未登录' }}</strong>
+              <small>{{ signedInUser ? '将以当前账号作为发起人' : '登录后即可发布' }}</small>
             </span>
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 12 2 2 4-5"></path><circle cx="12" cy="12" r="9"></circle></svg>
           </div>
@@ -1574,8 +1625,8 @@ onBeforeUnmount(clearMatchAnimationTimers);
         <p v-if="publishFormMessage" class="publish-form-message" role="status">{{ publishFormMessage }}</p>
 
         <div class="publish-form-actions">
-          <button type="button" @click="savePublishDraft">保存草稿</button>
-          <button type="submit">确认发布</button>
+          <button v-if="!editingPublication || editingPublication.status === 'DRAFT'" type="button" :disabled="publicationBusy || accountBusy || !signedInUser" @click="savePublishDraft">保存草稿</button>
+          <button type="submit" :disabled="publicationBusy || accountBusy || !signedInUser">{{ publicationBusy ? '正在保存…' : editingPublication?.status === 'OPEN' ? '保存修改' : '确认发布' }}</button>
         </div>
       </form>
     </main>
@@ -1600,10 +1651,10 @@ onBeforeUnmount(clearMatchAnimationTimers);
           <p v-if="developmentAccounts.length">本地开发账号</p>
           <div class="account-session-actions">
             <button v-for="account in developmentAccounts" :key="account.id" type="button"
-              :disabled="accountBusy || profileSaving || account.id === signedInUser?.id" @click="selectAccount(account.id)">
+              :disabled="accountBusy || profileSaving || publicationBusy || account.id === signedInUser?.id" @click="selectAccount(account.id)">
               {{ account.displayName }} · {{ account.role === 'TEACHER' ? '老师' : '学生' }}
             </button>
-            <button v-if="signedInUser" type="button" :disabled="accountBusy || profileSaving" @click="signOut">退出登录</button>
+            <button v-if="signedInUser" type="button" :disabled="accountBusy || profileSaving || publicationBusy" @click="signOut">退出登录</button>
           </div>
           <p v-if="accountMessage" role="status">{{ accountMessage }}</p>
         </section>
@@ -1661,15 +1712,22 @@ onBeforeUnmount(clearMatchAnimationTimers);
           <span><h1>我的发布</h1></span>
         </header>
         <section class="profile-manage-list">
+          <p v-if="publicationMessage" role="status">{{ publicationMessage }}</p>
+          <p v-if="!profilePublications.length">{{ signedInUser ? '还没有发布，去发布一个校园机会吧。' : '登录后可查看你的发布。' }}</p>
           <article v-for="item in profilePublications" :key="item.id" class="profile-manage-card">
-            <header><span>{{ item.category }}</span><em :class="{ draft: item.status === '草稿' }">{{ item.status }}</em></header>
-            <h2>{{ item.title }}</h2>
-            <p>{{ item.summary }}</p>
-            <div><span>{{ item.deadline }} 截止</span><span>{{ item.applicants }} 人申请</span></div>
+            <header><span>{{ categoryLabels[item.category.toLowerCase() as Exclude<Category, 'all'>] }}</span><em :class="{ draft: item.status === 'DRAFT' }">{{ publicationStatus(item) }}</em></header>
+            <h2>{{ item.title || '未命名草稿' }}</h2>
+            <p>{{ item.description }}</p>
+            <div><span>{{ item.deadline ? `${item.deadline.slice(0, 10)} 截止` : '截止日期待填写' }}</span><span>{{ item.applicants }} 人申请</span></div>
             <footer>
-              <small>{{ item.status === '草稿' ? '完善后即可发布' : '修改后会更新展示内容' }}</small>
-              <button type="button" @click="openProfilePublicationEditor(item.id)">编辑发布</button>
+              <button v-if="['DRAFT', 'OPEN'].includes(item.status)" type="button" :disabled="publicationBusy" @click="openProfilePublicationEditor(item.id)">{{ item.status === 'DRAFT' ? '继续编辑' : '编辑发布' }}</button>
+              <button v-if="item.status === 'OPEN'" type="button" :disabled="publicationBusy" @click="confirmCloseId = item.id">关闭招募</button>
             </footer>
+            <div v-if="confirmCloseId === item.id" role="group" aria-label="确认关闭招募">
+              <span>关闭后停止招募，保留历史记录。</span>
+              <button type="button" :disabled="publicationBusy" @click="closePublication(item.id)">确认关闭</button>
+              <button type="button" :disabled="publicationBusy" @click="confirmCloseId = null">取消</button>
+            </div>
           </article>
         </section>
       </template>
@@ -1781,22 +1839,6 @@ onBeforeUnmount(clearMatchAnimationTimers);
             </label>
             <p v-if="profileSaveMessage" class="profile-save-message" role="status">{{ profileSaveMessage }}</p>
             <button class="application-submit-button" type="submit">保存个人说明</button>
-          </form>
-        </section>
-      </div>
-
-      <div v-if="isProfilePublicationEditorOpen" class="application-sheet-backdrop" @click.self="closeProfilePublicationEditor">
-        <section class="application-sheet profile-editor-sheet" role="dialog" aria-modal="true" aria-labelledby="publication-editor-title">
-          <div class="application-sheet-handle" aria-hidden="true"></div>
-          <header class="application-sheet-header">
-            <div><h2 id="publication-editor-title">编辑发布</h2><p>修改后会同步更新这条校园机会</p></div>
-            <button type="button" aria-label="关闭发布编辑" @click="closeProfilePublicationEditor"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"></path></svg></button>
-          </header>
-          <form class="profile-editor-form" @submit.prevent="saveProfilePublication">
-            <label class="publish-field"><span>机会标题 <small>必填</small></span><input v-model="profilePublicationDraft.title" maxlength="60" /></label>
-            <label class="publish-field"><span>机会介绍 <small>必填</small></span><textarea v-model="profilePublicationDraft.summary" maxlength="300"></textarea><i>{{ profilePublicationDraft.summary.length }}/300</i></label>
-            <label class="publish-field"><span>申请截止日期 <small>必填</small></span><input v-model="profilePublicationDraft.deadline" type="date" /></label>
-            <button class="application-submit-button" type="submit" :disabled="!profilePublicationDraft.title.trim() || !profilePublicationDraft.summary.trim() || !profilePublicationDraft.deadline">保存修改</button>
           </form>
         </section>
       </div>
