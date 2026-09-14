@@ -14,7 +14,7 @@ export interface PersonalProfile {
   availability: string;
   matchingEnabled: boolean;
 }
-export type CurrentUser = Account & { profile: PersonalProfile | null };
+export type CurrentUser = Account & { profile: PersonalProfile | null; contact: string };
 
 const storageKey = 'campus-session-v1';
 let token = sessionStorage.getItem(storageKey) ?? '';

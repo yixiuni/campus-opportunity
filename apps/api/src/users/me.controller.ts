@@ -42,7 +42,7 @@ export class MeController {
   @Header('Cache-Control', 'no-store')
   current(@Req() request: AuthenticatedRequest) {
     return this.prisma.user.findUniqueOrThrow({
-      where: { id: request.user.id }, select: { ...publicUserSelect, profile: true },
+      where: { id: request.user.id }, select: { ...publicUserSelect, profile: true, contact: true },
     });
   }
 
@@ -55,15 +55,28 @@ export class MeController {
     });
   }
 
+  @Patch('contact')
+  updateContact(@Req() request: AuthenticatedRequest, @Body() body: unknown) {
+    if (!body || typeof body !== 'object' || Array.isArray(body) || Object.keys(body).length !== 1 ||
+      !('contact' in body) || typeof body.contact !== 'string' || [...body.contact.trim()].length > 120) {
+      throw new BadRequestException('联系方式最多 120 字');
+    }
+    return this.prisma.user.update({ where: { id: request.user.id }, data: { contact: body.contact.trim() }, select: { contact: true } });
+  }
+
   @Get('opportunities')
-  publications(@Req() request: AuthenticatedRequest) {
-    return this.prisma.opportunity.findMany({ where: { publisherId: request.user.id }, orderBy: { createdAt: 'desc' } });
+  async publications(@Req() request: AuthenticatedRequest) {
+    const records = await this.prisma.opportunity.findMany({ where: { publisherId: request.user.id }, orderBy: { createdAt: 'desc' },
+      include: { _count: { select: { applications: { where: { status: { not: 'WITHDRAWN' } } } } } } });
+    return records.map(({ _count, ...item }) => ({ ...item, applicants: _count.applications }));
   }
 
   @Get('opportunities/:id')
   async publication(@Req() request: AuthenticatedRequest, @Param('id') id: string) {
-    const opportunity = await this.prisma.opportunity.findFirst({ where: { id, publisherId: request.user.id } });
+    const opportunity = await this.prisma.opportunity.findFirst({ where: { id, publisherId: request.user.id },
+      include: { _count: { select: { applications: { where: { status: { not: 'WITHDRAWN' } } } } } } });
     if (!opportunity) throw new NotFoundException('未找到你的发布');
-    return opportunity;
+    const { _count, ...item } = opportunity;
+    return { ...item, applicants: _count.applications };
   }
 }

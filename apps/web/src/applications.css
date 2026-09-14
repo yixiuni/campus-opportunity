@@ -1,0 +1,11 @@
+.application-feedback { display: flex; align-items: center; gap: 12px; margin: 8px 16px; font-size: 13px; flex-wrap: wrap; }
+.application-feedback button { margin-left: auto; border: 0; background: transparent; color: var(--brand, #2f63c7); padding: 8px; }
+.application-info-sheet { max-height: 80dvh; overflow-y: auto; }
+.application-info-sheet p { white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.7; }
+.application-info-sheet h4 { margin: 20px 0 8px; }
+.private-contact { font-weight: 600; user-select: text; }
+.contact-settings { margin-top: 16px; padding: 16px; background: white; border-radius: 12px; }
+.contact-settings p { font-size: 12px; line-height: 1.6; color: #626366; }
+.contact-settings button { border: 0; border-radius: 8px; padding: 12px 16px; background: #2f63c7; color: white; }
+.application-record-card footer { flex-wrap: wrap; gap: 8px; }
+button:disabled { cursor: not-allowed; }

@@ -27,6 +27,11 @@ const categoryMap: Record<OpportunityCategory, OpportunityRecord['category']> = 
   STUDY: 'study',
 };
 
+const publicInclude = {
+  publisher: true,
+  _count: { select: { applications: { where: { status: { not: 'WITHDRAWN' as const } } } } },
+} satisfies Prisma.OpportunityInclude;
+
 @Injectable()
 export class OpportunitiesService {
   constructor(private readonly prisma: PrismaService) {}
@@ -34,14 +39,14 @@ export class OpportunitiesService {
   async findAll(): Promise<OpportunityRecord[]> {
     const opportunities = await this.prisma.opportunity.findMany({
       where: { status: OpportunityStatus.OPEN, deadline: { gt: new Date() } },
-      include: { publisher: true },
+      include: publicInclude,
       orderBy: [{ featured: 'desc' }, { publishedAt: 'desc' }],
     });
 
     return opportunities.map((opportunity) => this.serialize(opportunity));
   }
 
-  private serialize(opportunity: Prisma.OpportunityGetPayload<{ include: { publisher: true } }>) {
+  private serialize(opportunity: Prisma.OpportunityGetPayload<{ include: typeof publicInclude }>) {
     return {
       id: opportunity.id,
       title: opportunity.title,
@@ -52,7 +57,7 @@ export class OpportunitiesService {
       tags: opportunity.tags,
       commitment: opportunity.commitment,
       location: opportunity.location,
-      applicants: opportunity.applicants,
+      applicants: opportunity._count.applications,
       deadline: opportunity.deadline!.toISOString().slice(0, 10),
       publishedAt: opportunity.publishedAt.toISOString(),
       featured: opportunity.featured || undefined,
@@ -61,7 +66,7 @@ export class OpportunitiesService {
 
   async findOne(id: string) {
     const item = await this.prisma.opportunity.findFirst({
-      where: { id, status: 'OPEN', deadline: { gt: new Date() } }, include: { publisher: true },
+      where: { id, status: 'OPEN', deadline: { gt: new Date() } }, include: publicInclude,
     });
     if (!item) throw new NotFoundException('机会已关闭、过期或不存在');
     return this.serialize(item);
